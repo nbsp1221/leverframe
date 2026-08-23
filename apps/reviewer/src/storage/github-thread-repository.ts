@@ -422,7 +422,7 @@ export class GitHubThreadRepository {
         FROM review_jobs AS jobs
         JOIN review_artifacts AS artifacts ON artifacts.job_id=jobs.id
         JOIN json_each(artifacts.result_json,'$.finding_updates') AS updates
-        WHERE jobs.repository=? AND jobs.pull_request_number=? AND jobs.state='DONE'
+        WHERE jobs.repository=? AND jobs.pull_request_number=? AND jobs.id>? AND jobs.state='DONE'
           AND artifacts.availability='AVAILABLE' AND json_valid(artifacts.result_json)
           AND sha256(artifacts.result_json)=artifacts.content_hash
           AND sha256(artifacts.result_json)=jobs.artifact_hash
@@ -430,7 +430,7 @@ export class GitHubThreadRepository {
         ORDER BY jobs.id DESC
         LIMIT 1
       `)
-      .get(input.repository, input.pullRequestNumber, input.fingerprint) as
+      .get(input.repository, input.pullRequestNumber, input.jobId, input.fingerprint) as
       | { evidence: string; head_sha: string; job_id: number; status: string }
       | undefined;
     if (latestUpdate?.status !== 'fixed') {

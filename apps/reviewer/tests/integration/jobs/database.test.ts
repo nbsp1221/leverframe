@@ -501,6 +501,122 @@ describe('JobDatabase', () => {
     database.close();
   });
 
+  it('does not apply an older fix to a newly published recurrence', () => {
+    const database = new JobDatabase(':memory:');
+    const finding: ReviewResult['findings'][number] = {
+      confidence: 'high',
+      evidence: 'The comparison is inverted.',
+      explanation: 'The condition accepts the wrong user.',
+      file: 'src/auth.ts',
+      line: 7,
+      severity: 'high',
+      suggested_action: 'Require the same user.',
+      title: 'Authorization comparison is inverted',
+    };
+    const fingerprint = findingFingerprint(finding);
+    const emptyResult: ReviewResult = {
+      findings: [],
+      limitations: [],
+      summary: 'No new findings.',
+      tests_run: [],
+    };
+    database.enqueuePullRequest(baseJob);
+    const originalJob = database.claimNextJob();
+    if (originalJob === undefined) {
+      throw new Error('expected an original publication job');
+    }
+    database.recordReviewArtifact(originalJob.id, { ...emptyResult, findings: [finding] });
+    database.updateJob({ id: originalJob.id, state: 'DONE' });
+
+    database.enqueuePullRequest({
+      ...baseJob,
+      deliveryId: 'delivery-original-fix',
+      headSha: 'b'.repeat(40),
+    });
+    const fixedJob = database.claimNextJob();
+    if (fixedJob === undefined) {
+      throw new Error('expected an original fix job');
+    }
+    const fixedResult: ReviewResult = {
+      ...emptyResult,
+      finding_updates: [{ evidence: 'Fixed at b.', fingerprint, status: 'fixed' }],
+    };
+    database.recordReviewArtifact(fixedJob.id, fixedResult);
+    database.updateJob({ id: fixedJob.id, state: 'PUBLISHING' });
+    database.completeReviewJob({
+      attempt: fixedJob.attempt ?? 0,
+      headSha: fixedJob.headSha,
+      jobId: fixedJob.id,
+      pullRequestNumber: fixedJob.pullRequestNumber,
+      repository: fixedJob.repository,
+      updates: fixedResult.finding_updates ?? [],
+    });
+
+    database.enqueuePullRequest({
+      ...baseJob,
+      deliveryId: 'delivery-recurrence',
+      headSha: 'c'.repeat(40),
+    });
+    const recurrenceJob = database.claimNextJob();
+    if (recurrenceJob === undefined) {
+      throw new Error('expected a recurrence publication job');
+    }
+    database.recordReviewArtifact(recurrenceJob.id, { ...emptyResult, findings: [finding] });
+    database.updateJob({ id: recurrenceJob.id, state: 'DONE' });
+    database.recordGitHubThreadAssociation({
+      commentNodeId: 'PRRC_recurrence',
+      fingerprint,
+      jobId: recurrenceJob.id,
+      pullRequestNumber: recurrenceJob.pullRequestNumber,
+      repository: recurrenceJob.repository,
+      reviewDatabaseId: '102',
+      threadNodeId: 'PRRT_recurrence',
+    });
+
+    expect(database.nextPendingThreadResolution()).toBeUndefined();
+    expect(
+      database.getFindingThreadStatuses(baseJob.repository, baseJob.pullRequestNumber),
+    ).toEqual([
+      {
+        fingerprint,
+        resolutionState: 'OPEN',
+        threadNodeId: 'PRRT_recurrence',
+      },
+    ]);
+
+    database.enqueuePullRequest({
+      ...baseJob,
+      deliveryId: 'delivery-recurrence-fix',
+      headSha: 'd'.repeat(40),
+    });
+    const recurrenceFixJob = database.claimNextJob();
+    if (recurrenceFixJob === undefined) {
+      throw new Error('expected a recurrence fix job');
+    }
+    const recurrenceFixResult: ReviewResult = {
+      ...emptyResult,
+      finding_updates: [{ evidence: 'Fixed after recurrence.', fingerprint, status: 'fixed' }],
+    };
+    database.recordReviewArtifact(recurrenceFixJob.id, recurrenceFixResult);
+    database.updateJob({ id: recurrenceFixJob.id, state: 'PUBLISHING' });
+    expect(
+      database.completeReviewJob({
+        attempt: recurrenceFixJob.attempt ?? 0,
+        headSha: recurrenceFixJob.headSha,
+        jobId: recurrenceFixJob.id,
+        pullRequestNumber: recurrenceFixJob.pullRequestNumber,
+        repository: recurrenceFixJob.repository,
+        updates: recurrenceFixResult.finding_updates ?? [],
+      }),
+    ).toEqual({ completed: true, queuedThreadCount: 1 });
+    expect(database.nextPendingThreadResolution()).toMatchObject({
+      evidence: 'Fixed after recurrence.',
+      jobId: recurrenceFixJob.id,
+      threadNodeId: 'PRRT_recurrence',
+    });
+    database.close();
+  });
+
   it('completes a stale association intent when a recovered review has no inline comments', () => {
     const database = new JobDatabase(':memory:');
     database.enqueuePullRequest(baseJob);
