@@ -135,6 +135,7 @@ export class ThreadSideEffectWorker {
         delayMilliseconds: 60_000,
         error: 'GitHub App credentials are not configured',
         id: pending.id,
+        jobId: pending.jobId,
       });
       return true;
     }
@@ -153,6 +154,7 @@ export class ThreadSideEffectWorker {
       });
       this.options.database.markThreadResolved({
         id: pending.id,
+        jobId: pending.jobId,
         ...(result.resolutionCommentNodeId === undefined
           ? {}
           : { resolutionCommentNodeId: result.resolutionCommentNodeId }),
@@ -168,11 +170,13 @@ export class ThreadSideEffectWorker {
           delayMilliseconds: Math.min(recoveryDelayMilliseconds, 5_000 * 2 ** pending.attempt),
           error: message,
           id: pending.id,
+          jobId: pending.jobId,
         });
       } else {
         this.options.database.failThreadResolution({
           error: message,
           id: pending.id,
+          jobId: pending.jobId,
           retryDelayMilliseconds: recoveryDelayMilliseconds,
         });
       }

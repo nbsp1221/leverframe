@@ -371,6 +371,7 @@ describe('JobDatabase', () => {
     database.failThreadResolution({
       error: 'temporary terminal failure',
       id: pending.id,
+      jobId: pending.jobId,
       retryDelayMilliseconds: 0,
     });
     expect(database.nextPendingThreadResolution()).toMatchObject({
@@ -379,6 +380,7 @@ describe('JobDatabase', () => {
     });
     database.markThreadResolved({
       id: pending.id,
+      jobId: pending.jobId,
       resolutionCommentNodeId: 'PRRC_resolution',
       resolvedAt: '2026-08-23T00:00:00.000Z',
     });
@@ -394,6 +396,173 @@ describe('JobDatabase', () => {
         threadNodeId: 'PRRT_thread',
       },
     ]);
+    database.close();
+  });
+
+  it('reconciles a fixed finding when its GitHub thread is associated later', () => {
+    const database = new JobDatabase(':memory:');
+    const finding: ReviewResult['findings'][number] = {
+      confidence: 'high',
+      evidence: 'The comparison is inverted.',
+      explanation: 'The authorization check allows the wrong user.',
+      file: 'src/access.ts',
+      line: 12,
+      severity: 'high',
+      suggested_action: 'Invert the comparison.',
+      title: 'Authorization comparison is inverted',
+    };
+    const fingerprint = findingFingerprint(finding);
+    const emptyResult: ReviewResult = {
+      findings: [],
+      limitations: [],
+      summary: 'No new findings.',
+      tests_run: [],
+    };
+    database.enqueuePullRequest(baseJob);
+    const publicationJob = database.claimNextJob();
+    if (publicationJob === undefined) {
+      throw new Error('expected a publication job');
+    }
+    database.reconcileFindings({
+      job: publicationJob,
+      previousResult: undefined,
+      result: { ...emptyResult, findings: [finding] },
+    });
+    database.updateJob({ id: publicationJob.id, state: 'DONE' });
+
+    database.enqueuePullRequest({
+      ...baseJob,
+      deliveryId: 'delivery-fixed-before-association',
+      headSha: 'b'.repeat(40),
+    });
+    const resolutionJob = database.claimNextJob();
+    if (resolutionJob === undefined) {
+      throw new Error('expected a resolution job');
+    }
+    const fixedResult: ReviewResult = {
+      ...emptyResult,
+      finding_updates: [
+        { evidence: 'The comparison now requires the same user.', fingerprint, status: 'fixed' },
+      ],
+    };
+    database.reconcileFindings({
+      job: resolutionJob,
+      previousResult: { ...emptyResult, findings: [finding] },
+      result: fixedResult,
+    });
+    expect(
+      database.queueFixedFindingResolutions({
+        headSha: resolutionJob.headSha,
+        jobId: resolutionJob.id,
+        pullRequestNumber: resolutionJob.pullRequestNumber,
+        repository: resolutionJob.repository,
+        updates: fixedResult.finding_updates ?? [],
+      }),
+    ).toBe(0);
+    database.updateJob({ id: resolutionJob.id, state: 'DONE' });
+
+    database.recordGitHubThreadAssociation({
+      commentNodeId: 'PRRC_late',
+      fingerprint,
+      jobId: publicationJob.id,
+      pullRequestNumber: publicationJob.pullRequestNumber,
+      repository: publicationJob.repository,
+      reviewDatabaseId: '101',
+      threadNodeId: 'PRRT_late',
+    });
+    expect(database.nextPendingThreadResolution()).toMatchObject({
+      evidence: 'The comparison now requires the same user.',
+      headSha: resolutionJob.headSha,
+      jobId: resolutionJob.id,
+      threadNodeId: 'PRRT_late',
+    });
+    database.close();
+  });
+
+  it('completes a stale association intent when a recovered review has no inline comments', () => {
+    const database = new JobDatabase(':memory:');
+    database.enqueuePullRequest(baseJob);
+    const publicationJob = database.claimNextJob();
+    if (publicationJob === undefined) {
+      throw new Error('expected a publication job');
+    }
+    database.queueGitHubThreadAssociation({
+      expectedFingerprints: ['1234567890abcdef'],
+      jobId: publicationJob.id,
+      pullRequestNumber: publicationJob.pullRequestNumber,
+      repository: publicationJob.repository,
+      reviewDatabaseId: 101,
+    });
+    expect(database.nextPendingGitHubThreadAssociation()).toBeDefined();
+
+    database.queueGitHubThreadAssociation({
+      expectedFingerprints: [],
+      jobId: publicationJob.id,
+      pullRequestNumber: publicationJob.pullRequestNumber,
+      repository: publicationJob.repository,
+      reviewDatabaseId: 101,
+    });
+    expect(database.nextPendingGitHubThreadAssociation()).toBeUndefined();
+    database.close();
+  });
+
+  it('supersedes pending resolution work with the newest verified fix', () => {
+    const database = new JobDatabase(':memory:');
+    const fingerprint = '1234567890abcdef';
+    database.enqueuePullRequest(baseJob);
+    const publicationJob = database.claimNextJob();
+    if (publicationJob === undefined) {
+      throw new Error('expected a publication job');
+    }
+    database.recordGitHubThreadAssociation({
+      commentNodeId: 'PRRC_comment',
+      fingerprint,
+      jobId: publicationJob.id,
+      pullRequestNumber: publicationJob.pullRequestNumber,
+      repository: publicationJob.repository,
+      reviewDatabaseId: '101',
+      threadNodeId: 'PRRT_thread',
+    });
+    database.updateJob({ id: publicationJob.id, state: 'DONE' });
+
+    const queueFix = (deliveryId: string, headSha: string, evidence: string) => {
+      database.enqueuePullRequest({ ...baseJob, deliveryId, headSha });
+      const job = database.claimNextJob();
+      if (job === undefined) {
+        throw new Error('expected a resolution job');
+      }
+      expect(
+        database.queueFixedFindingResolutions({
+          headSha,
+          jobId: job.id,
+          pullRequestNumber: job.pullRequestNumber,
+          repository: job.repository,
+          updates: [{ evidence, fingerprint, status: 'fixed' }],
+        }),
+      ).toBe(1);
+      database.updateJob({ id: job.id, state: 'DONE' });
+      return job;
+    };
+
+    const olderJob = queueFix('delivery-older-fix', 'b'.repeat(40), 'Older fix evidence.');
+    const olderPending = database.nextPendingThreadResolution();
+    if (olderPending === undefined) {
+      throw new Error('expected older pending resolution');
+    }
+    const newerJob = queueFix('delivery-newer-fix', 'c'.repeat(40), 'Newest fix evidence.');
+
+    database.failThreadResolution({
+      error: 'stale worker failure',
+      id: olderPending.id,
+      jobId: olderJob.id,
+      retryDelayMilliseconds: 0,
+    });
+    expect(database.nextPendingThreadResolution()).toMatchObject({
+      attempt: 0,
+      evidence: 'Newest fix evidence.',
+      headSha: newerJob.headSha,
+      jobId: newerJob.id,
+    });
     database.close();
   });
 

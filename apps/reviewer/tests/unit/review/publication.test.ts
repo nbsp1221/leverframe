@@ -133,3 +133,140 @@ describe('review publication cancellation', () => {
     expect(reviewPostRequests).toBe(0);
   });
 });
+
+describe('review publication identity', () => {
+  it('preserves the trusted inline marker when a long finding body is truncated', async () => {
+    let publishedBody = '';
+    githubMocks.installationRequest.mockImplementation((route: string, parameters: unknown) => {
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') {
+        return { data: { head: { sha: 'a'.repeat(40) } } };
+      }
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
+        return { data: [] };
+      }
+      if (route === 'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
+        const request = parameters as { comments: Array<{ body: string }> };
+        publishedBody = request.comments[0]?.body ?? '';
+        return { data: { id: 999 } };
+      }
+      throw new Error(`unexpected route: ${route}`);
+    });
+    const longResult: ReviewResult = {
+      ...result,
+      findings: [{ ...result.findings[0]!, explanation: 'x'.repeat(61_000) }],
+    };
+    const publication = prepareReviewPublication(
+      longResult,
+      new Map([['src/changed.ts', new Set([7])]]),
+      7,
+    );
+
+    const published = await createClient().publishReview({
+      expectedHeadSha: 'a'.repeat(40),
+      inlineComments: publication.inlineComments,
+      inlineFindingIndexes: publication.inlineFindingIndexes,
+      installationId: 42,
+      jobId: 7,
+      pullRequestNumber: 7,
+      repository: 'example/project',
+      result: longResult,
+      signal: new AbortController().signal,
+    });
+
+    expect(published.publishedInlineFingerprints).toEqual([
+      publication.inlineComments[0]?.fingerprint,
+    ]);
+    expect(publishedBody).toHaveLength(60_000);
+    expect(parseFindingPublicationMarker(publishedBody)).toEqual({
+      fingerprint: publication.inlineComments[0]?.fingerprint,
+      jobId: 7,
+    });
+  });
+
+  it('reports no inline fingerprints after a summary fallback', async () => {
+    let postAttempts = 0;
+    githubMocks.installationRequest.mockImplementation((route: string, parameters: unknown) => {
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') {
+        return { data: { head: { sha: 'a'.repeat(40) } } };
+      }
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
+        return { data: [] };
+      }
+      if (route === 'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
+        postAttempts += 1;
+        const request = parameters as { comments?: unknown[] };
+        if (request.comments !== undefined) {
+          throw Object.assign(new Error('inline comment rejected'), { status: 422 });
+        }
+        return { data: { id: 999 } };
+      }
+      throw new Error(`unexpected route: ${route}`);
+    });
+    const publication = prepareReviewPublication(
+      result,
+      new Map([['src/changed.ts', new Set([7])]]),
+      7,
+    );
+
+    await expect(
+      createClient().publishReview({
+        expectedHeadSha: 'a'.repeat(40),
+        inlineComments: publication.inlineComments,
+        inlineFindingIndexes: publication.inlineFindingIndexes,
+        installationId: 42,
+        jobId: 7,
+        pullRequestNumber: 7,
+        repository: 'example/project',
+        result,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ publishedInlineFingerprints: [], reviewId: 999 });
+    expect(postAttempts).toBe(2);
+  });
+
+  it('recovers the actual inline fingerprints for a persisted review', async () => {
+    const publication = prepareReviewPublication(
+      result,
+      new Map([['src/changed.ts', new Set([7])]]),
+      7,
+    );
+    githubMocks.installationRequest.mockImplementation((route: string) => {
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') {
+        return { data: { head: { sha: 'a'.repeat(40) } } };
+      }
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments') {
+        return { data: [{ body: publication.inlineComments[0]?.body ?? '' }] };
+      }
+      throw new Error(`unexpected route: ${route}`);
+    });
+
+    await expect(
+      createClient().publishReview({
+        expectedHeadSha: 'a'.repeat(40),
+        inlineComments: publication.inlineComments,
+        inlineFindingIndexes: publication.inlineFindingIndexes,
+        installationId: 42,
+        jobId: 7,
+        knownReviewId: 999,
+        pullRequestNumber: 7,
+        repository: 'example/project',
+        result,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      publishedInlineFingerprints: [publication.inlineComments[0]?.fingerprint],
+      reviewId: 999,
+    });
+  });
+});
+
+function createClient(): GitHubAppClient {
+  return new GitHubAppClient({
+    appId: 1,
+    clientId: 'client',
+    name: 'leverframe',
+    privateKey: 'private-key',
+    slug: 'leverframe',
+    webhookSecret: 'secret',
+  });
+}

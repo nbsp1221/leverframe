@@ -53,29 +53,37 @@ export class GitHubThreadRepository {
     threadNodeId: string;
   }): void {
     const now = new Date().toISOString();
-    this.database
-      .prepare(`
-        INSERT INTO github_finding_threads (
-          repository, pull_request_number, fingerprint, publication_job_id,
-          review_database_id, thread_node_id, comment_node_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(publication_job_id, fingerprint) DO UPDATE SET
-          review_database_id=excluded.review_database_id,
-          thread_node_id=excluded.thread_node_id,
-          comment_node_id=excluded.comment_node_id,
-          updated_at=excluded.updated_at
-      `)
-      .run(
-        input.repository,
-        input.pullRequestNumber,
-        input.fingerprint,
-        input.jobId,
-        input.reviewDatabaseId,
-        input.threadNodeId,
-        input.commentNodeId,
-        now,
-        now,
-      );
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      this.database
+        .prepare(`
+          INSERT INTO github_finding_threads (
+            repository, pull_request_number, fingerprint, publication_job_id,
+            review_database_id, thread_node_id, comment_node_id, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(publication_job_id, fingerprint) DO UPDATE SET
+            review_database_id=excluded.review_database_id,
+            thread_node_id=excluded.thread_node_id,
+            comment_node_id=excluded.comment_node_id,
+            updated_at=excluded.updated_at
+        `)
+        .run(
+          input.repository,
+          input.pullRequestNumber,
+          input.fingerprint,
+          input.jobId,
+          input.reviewDatabaseId,
+          input.threadNodeId,
+          input.commentNodeId,
+          now,
+          now,
+        );
+      this.#queueAssociatedFixedFinding(input, now);
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   queueAssociation(input: {
@@ -86,6 +94,7 @@ export class GitHubThreadRepository {
     reviewDatabaseId: number;
   }): void {
     if (input.expectedFingerprints.length === 0) {
+      this.completeAssociation(input.jobId);
       return;
     }
     const now = new Date().toISOString();
@@ -221,10 +230,12 @@ export class GitHubThreadRepository {
       SET resolution_state='RESOLUTION_PENDING', resolved_by_job_id=?, resolved_head_sha=?,
           resolution_evidence=?, resolution_attempts=0, next_resolution_at=?, last_error=NULL,
           updated_at=?
-      WHERE resolution_state IN ('OPEN','RESOLUTION_FAILED') AND id=(
+      WHERE resolution_state IN ('OPEN','RESOLUTION_FAILED','RESOLUTION_PENDING')
+        AND (resolved_by_job_id IS NULL OR resolved_by_job_id <= ?)
+        AND id=(
         SELECT id FROM github_finding_threads
         WHERE repository=? AND pull_request_number=? AND fingerprint=?
-        ORDER BY id DESC LIMIT 1
+        ORDER BY publication_job_id DESC, id DESC LIMIT 1
       )
     `);
     let queued = 0;
@@ -241,6 +252,7 @@ export class GitHubThreadRepository {
             redactFailureExcerpt(update.evidence),
             now,
             now,
+            input.jobId,
             input.repository,
             input.pullRequestNumber,
             update.fingerprint,
@@ -288,48 +300,63 @@ export class GitHubThreadRepository {
     };
   }
 
-  markResolved(input: { id: number; resolutionCommentNodeId?: string; resolvedAt?: string }): void {
+  markResolved(input: {
+    id: number;
+    jobId: number;
+    resolutionCommentNodeId?: string;
+    resolvedAt?: string;
+  }): void {
     const resolvedAt = input.resolvedAt ?? new Date().toISOString();
     this.database
       .prepare(`
         UPDATE github_finding_threads
         SET resolution_state='RESOLVED', resolution_comment_node_id=COALESCE(?,resolution_comment_node_id),
             resolved_at=?, next_resolution_at=NULL, last_error=NULL, updated_at=?
-        WHERE id=? AND resolution_state IN ('RESOLUTION_PENDING','RESOLUTION_FAILED','RESOLVED')
+        WHERE id=? AND resolved_by_job_id=?
+          AND resolution_state IN ('RESOLUTION_PENDING','RESOLUTION_FAILED','RESOLVED')
       `)
-      .run(input.resolutionCommentNodeId ?? null, resolvedAt, resolvedAt, input.id);
+      .run(input.resolutionCommentNodeId ?? null, resolvedAt, resolvedAt, input.id, input.jobId);
   }
 
-  markRetry(input: { id: number; error: string; delayMilliseconds: number }): void {
+  markRetry(input: { id: number; jobId: number; error: string; delayMilliseconds: number }): void {
     const now = new Date();
     this.database
       .prepare(`
         UPDATE github_finding_threads
         SET resolution_attempts=resolution_attempts+1, next_resolution_at=?, last_error=?, updated_at=?
-        WHERE id=? AND resolution_state IN ('RESOLUTION_PENDING','RESOLUTION_FAILED')
+        WHERE id=? AND resolved_by_job_id=?
+          AND resolution_state IN ('RESOLUTION_PENDING','RESOLUTION_FAILED')
       `)
       .run(
         new Date(now.getTime() + input.delayMilliseconds).toISOString(),
         input.error.slice(0, 4_000),
         now.toISOString(),
         input.id,
+        input.jobId,
       );
   }
 
-  markFailed(input: { id: number; error: string; retryDelayMilliseconds: number }): void {
+  markFailed(input: {
+    id: number;
+    jobId: number;
+    error: string;
+    retryDelayMilliseconds: number;
+  }): void {
     const now = new Date();
     this.database
       .prepare(`
         UPDATE github_finding_threads
         SET resolution_state='RESOLUTION_FAILED', resolution_attempts=resolution_attempts+1,
             next_resolution_at=?, last_error=?, updated_at=?
-        WHERE id=? AND resolution_state IN ('RESOLUTION_PENDING','RESOLUTION_FAILED')
+        WHERE id=? AND resolved_by_job_id=?
+          AND resolution_state IN ('RESOLUTION_PENDING','RESOLUTION_FAILED')
       `)
       .run(
         new Date(now.getTime() + input.retryDelayMilliseconds).toISOString(),
         input.error.slice(0, 4_000),
         now.toISOString(),
         input.id,
+        input.jobId,
       );
   }
 
@@ -339,10 +366,11 @@ export class GitHubThreadRepository {
         SELECT current.* FROM github_finding_threads AS current
         WHERE current.repository=? AND current.pull_request_number=?
           AND current.id=(
-            SELECT MAX(latest.id) FROM github_finding_threads AS latest
+            SELECT latest.id FROM github_finding_threads AS latest
             WHERE latest.repository=current.repository
               AND latest.pull_request_number=current.pull_request_number
               AND latest.fingerprint=current.fingerprint
+            ORDER BY latest.publication_job_id DESC, latest.id DESC LIMIT 1
           )
         ORDER BY current.id
       `)
@@ -381,5 +409,45 @@ export class GitHubThreadRepository {
       }
     }
     return statuses;
+  }
+
+  #queueAssociatedFixedFinding(
+    input: { fingerprint: string; jobId: number; pullRequestNumber: number; repository: string },
+    now: string,
+  ): void {
+    const fixed = this.database
+      .prepare(`
+        SELECT findings.evidence, findings.last_seen_job_id, jobs.head_sha
+        FROM review_findings AS findings
+        JOIN review_jobs AS jobs ON jobs.id=findings.last_seen_job_id
+        WHERE findings.repository=? AND findings.pull_request_number=?
+          AND findings.fingerprint=? AND findings.state='FIXED'
+      `)
+      .get(input.repository, input.pullRequestNumber, input.fingerprint) as
+      | { evidence: string; head_sha: string; last_seen_job_id: number }
+      | undefined;
+    if (fixed === undefined) {
+      return;
+    }
+    this.database
+      .prepare(`
+        UPDATE github_finding_threads
+        SET resolution_state='RESOLUTION_PENDING', resolved_by_job_id=?, resolved_head_sha=?,
+            resolution_evidence=?, resolution_attempts=0, next_resolution_at=?,
+            last_error=NULL, updated_at=?
+        WHERE publication_job_id=? AND fingerprint=?
+          AND resolution_state IN ('OPEN','RESOLUTION_FAILED','RESOLUTION_PENDING')
+          AND (resolved_by_job_id IS NULL OR resolved_by_job_id <= ?)
+      `)
+      .run(
+        Number(fixed.last_seen_job_id),
+        String(fixed.head_sha),
+        redactFailureExcerpt(String(fixed.evidence)),
+        now,
+        now,
+        input.jobId,
+        input.fingerprint,
+        Number(fixed.last_seen_job_id),
+      );
   }
 }

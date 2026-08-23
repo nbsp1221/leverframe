@@ -590,19 +590,21 @@ export class ReviewWorker {
       return undefined;
     }
     const publication = prepareReviewPublication(input.result, input.reviewableLines, input.job.id);
-    const reviewId =
-      input.job.publishedReviewId ??
-      (await input.github.publishReview({
-        expectedHeadSha: input.job.headSha,
-        installationId: input.job.installationId,
-        inlineComments: publication.inlineComments,
-        inlineFindingIndexes: publication.inlineFindingIndexes,
-        jobId: input.job.id,
-        pullRequestNumber: input.job.pullRequestNumber,
-        repository: input.job.repository,
-        result: input.result,
-        signal: input.signal,
-      }));
+    const published = await input.github.publishReview({
+      expectedHeadSha: input.job.headSha,
+      installationId: input.job.installationId,
+      inlineComments: publication.inlineComments,
+      inlineFindingIndexes: publication.inlineFindingIndexes,
+      jobId: input.job.id,
+      ...(input.job.publishedReviewId === undefined
+        ? {}
+        : { knownReviewId: input.job.publishedReviewId }),
+      pullRequestNumber: input.job.pullRequestNumber,
+      repository: input.job.repository,
+      result: input.result,
+      signal: input.signal,
+    });
+    const reviewId = published.reviewId;
     if (input.job.publishedReviewId === undefined) {
       this.options.database.updateJob({
         attempt: input.job.attempt ?? 0,
@@ -613,7 +615,7 @@ export class ReviewWorker {
       });
     }
     this.options.database.queueGitHubThreadAssociation({
-      expectedFingerprints: publication.inlineComments.map((comment) => comment.fingerprint),
+      expectedFingerprints: published.publishedInlineFingerprints,
       jobId: input.job.id,
       pullRequestNumber: input.job.pullRequestNumber,
       repository: input.job.repository,

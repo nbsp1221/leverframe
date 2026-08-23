@@ -640,17 +640,28 @@ export class JobDatabase {
 
   markThreadResolved(input: {
     id: number;
+    jobId: number;
     resolutionCommentNodeId?: string;
     resolvedAt?: string;
   }): void {
     this.#githubThreadRepository.markResolved(input);
   }
 
-  retryThreadResolution(input: { id: number; error: string; delayMilliseconds: number }): void {
+  retryThreadResolution(input: {
+    id: number;
+    jobId: number;
+    error: string;
+    delayMilliseconds: number;
+  }): void {
     this.#githubThreadRepository.markRetry(input);
   }
 
-  failThreadResolution(input: { id: number; error: string; retryDelayMilliseconds: number }): void {
+  failThreadResolution(input: {
+    id: number;
+    jobId: number;
+    error: string;
+    retryDelayMilliseconds: number;
+  }): void {
     this.#githubThreadRepository.markFailed(input);
   }
 
