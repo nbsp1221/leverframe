@@ -216,7 +216,9 @@ describe('ReviewWorker publication cancellation', () => {
     if (resolutionJob === undefined) {
       throw new Error('expected a resolution job');
     }
-    database.queueFixedFindingResolutions({
+    database.updateJob({ id: resolutionJob.id, state: 'PUBLISHING' });
+    database.completeReviewJob({
+      attempt: resolutionJob.attempt ?? 0,
       headSha,
       jobId: resolutionJob.id,
       pullRequestNumber: 7,
@@ -229,7 +231,6 @@ describe('ReviewWorker publication cancellation', () => {
         },
       ],
     });
-    database.updateJob({ id: resolutionJob.id, state: 'DONE' });
 
     githubMocks.getInstallationOctokit.mockResolvedValue({
       graphql: githubMocks.graphql,

@@ -624,14 +624,31 @@ export class JobDatabase {
     this.#githubThreadRepository.failAssociation(input);
   }
 
-  queueFixedFindingResolutions(input: {
+  completeReviewJob(input: {
+    attempt: number;
     headSha: string;
     jobId: number;
     pullRequestNumber: number;
     repository: string;
     updates: NonNullable<ReviewResult['finding_updates']>;
-  }): number {
-    return this.#githubThreadRepository.queueFixedFindings(input);
+  }): { completed: boolean; queuedThreadCount: number } {
+    this.#database.exec('BEGIN IMMEDIATE');
+    try {
+      const completed = this.updateJob({
+        attempt: input.attempt,
+        expectedStates: ['PUBLISHING'],
+        id: input.jobId,
+        state: 'DONE',
+      });
+      const queuedThreadCount = completed
+        ? this.#githubThreadRepository.queueFixedFindingsForCompletedJob(input)
+        : 0;
+      this.#database.exec('COMMIT');
+      return { completed, queuedThreadCount };
+    } catch (error) {
+      this.#database.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   nextPendingThreadResolution(jobId?: number): PendingThreadResolution | undefined {

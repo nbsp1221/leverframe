@@ -217,7 +217,7 @@ export class GitHubThreadRepository {
       );
   }
 
-  queueFixedFindings(input: {
+  queueFixedFindingsForCompletedJob(input: {
     headSha: string;
     jobId: number;
     pullRequestNumber: number;
@@ -225,6 +225,12 @@ export class GitHubThreadRepository {
     updates: NonNullable<ReviewResult['finding_updates']>;
   }): number {
     const now = new Date().toISOString();
+    const job = this.database
+      .prepare('SELECT state FROM review_jobs WHERE id=?')
+      .get(input.jobId) as { state: string } | undefined;
+    if (job?.state !== 'DONE') {
+      throw new Error(`review job ${input.jobId} must be DONE before queuing fixed findings`);
+    }
     const queue = this.database.prepare(`
       UPDATE github_finding_threads
       SET resolution_state='RESOLUTION_PENDING', resolved_by_job_id=?, resolved_head_sha=?,
@@ -239,32 +245,25 @@ export class GitHubThreadRepository {
       )
     `);
     let queued = 0;
-    this.database.exec('BEGIN IMMEDIATE');
-    try {
-      for (const update of input.updates) {
-        if (update.status !== 'fixed') {
-          continue;
-        }
-        queued += Number(
-          queue.run(
-            input.jobId,
-            input.headSha,
-            redactFailureExcerpt(update.evidence),
-            now,
-            now,
-            input.jobId,
-            input.repository,
-            input.pullRequestNumber,
-            update.fingerprint,
-          ).changes,
-        );
+    for (const update of input.updates) {
+      if (update.status !== 'fixed') {
+        continue;
       }
-      this.database.exec('COMMIT');
-      return queued;
-    } catch (error) {
-      this.database.exec('ROLLBACK');
-      throw error;
+      queued += Number(
+        queue.run(
+          input.jobId,
+          input.headSha,
+          redactFailureExcerpt(update.evidence),
+          now,
+          now,
+          input.jobId,
+          input.repository,
+          input.pullRequestNumber,
+          update.fingerprint,
+        ).changes,
+      );
     }
+    return queued;
   }
 
   nextPendingResolution(jobId?: number): PendingThreadResolution | undefined {
@@ -415,18 +414,26 @@ export class GitHubThreadRepository {
     input: { fingerprint: string; jobId: number; pullRequestNumber: number; repository: string },
     now: string,
   ): void {
-    const fixed = this.database
+    const latestUpdate = this.database
       .prepare(`
-        SELECT findings.evidence, findings.last_seen_job_id, jobs.head_sha
-        FROM review_findings AS findings
-        JOIN review_jobs AS jobs ON jobs.id=findings.last_seen_job_id
-        WHERE findings.repository=? AND findings.pull_request_number=?
-          AND findings.fingerprint=? AND findings.state='FIXED'
+        SELECT json_extract(updates.value,'$.evidence') AS evidence,
+          json_extract(updates.value,'$.status') AS status,
+          jobs.id AS job_id, jobs.head_sha
+        FROM review_jobs AS jobs
+        JOIN review_artifacts AS artifacts ON artifacts.job_id=jobs.id
+        JOIN json_each(artifacts.result_json,'$.finding_updates') AS updates
+        WHERE jobs.repository=? AND jobs.pull_request_number=? AND jobs.state='DONE'
+          AND artifacts.availability='AVAILABLE' AND json_valid(artifacts.result_json)
+          AND sha256(artifacts.result_json)=artifacts.content_hash
+          AND sha256(artifacts.result_json)=jobs.artifact_hash
+          AND json_extract(updates.value,'$.fingerprint')=?
+        ORDER BY jobs.id DESC
+        LIMIT 1
       `)
       .get(input.repository, input.pullRequestNumber, input.fingerprint) as
-      | { evidence: string; head_sha: string; last_seen_job_id: number }
+      | { evidence: string; head_sha: string; job_id: number; status: string }
       | undefined;
-    if (fixed === undefined) {
+    if (latestUpdate?.status !== 'fixed') {
       return;
     }
     this.database
@@ -440,14 +447,14 @@ export class GitHubThreadRepository {
           AND (resolved_by_job_id IS NULL OR resolved_by_job_id <= ?)
       `)
       .run(
-        Number(fixed.last_seen_job_id),
-        String(fixed.head_sha),
-        redactFailureExcerpt(String(fixed.evidence)),
+        Number(latestUpdate.job_id),
+        String(latestUpdate.head_sha),
+        redactFailureExcerpt(String(latestUpdate.evidence)),
         now,
         now,
         input.jobId,
         input.fingerprint,
-        Number(fixed.last_seen_job_id),
+        Number(latestUpdate.job_id),
       );
   }
 }

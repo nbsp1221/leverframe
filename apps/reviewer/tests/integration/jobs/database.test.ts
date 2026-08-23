@@ -338,8 +338,10 @@ describe('JobDatabase', () => {
     if (resolutionJob === undefined) {
       throw new Error('expected a resolution job');
     }
+    database.updateJob({ id: resolutionJob.id, state: 'PUBLISHING' });
     expect(
-      database.queueFixedFindingResolutions({
+      database.completeReviewJob({
+        attempt: resolutionJob.attempt ?? 0,
         headSha: resolutionJob.headSha,
         jobId: resolutionJob.id,
         pullRequestNumber: resolutionJob.pullRequestNumber,
@@ -350,10 +352,7 @@ describe('JobDatabase', () => {
           { evidence: 'Still present.', fingerprint, status: 'still_present' },
         ],
       }),
-    ).toBe(1);
-
-    expect(database.nextPendingThreadResolution()).toBeUndefined();
-    database.updateJob({ id: resolutionJob.id, state: 'DONE' });
+    ).toEqual({ completed: true, queuedThreadCount: 1 });
     const pending = database.nextPendingThreadResolution();
     expect(pending).toMatchObject({
       attempt: 0,
@@ -450,16 +449,39 @@ describe('JobDatabase', () => {
       previousResult: { ...emptyResult, findings: [finding] },
       result: fixedResult,
     });
+    database.recordReviewArtifact(resolutionJob.id, fixedResult);
+    database.updateJob({ id: resolutionJob.id, state: 'PUBLISHING' });
     expect(
-      database.queueFixedFindingResolutions({
+      database.completeReviewJob({
+        attempt: resolutionJob.attempt ?? 0,
         headSha: resolutionJob.headSha,
         jobId: resolutionJob.id,
         pullRequestNumber: resolutionJob.pullRequestNumber,
         repository: resolutionJob.repository,
         updates: fixedResult.finding_updates ?? [],
       }),
-    ).toBe(0);
-    database.updateJob({ id: resolutionJob.id, state: 'DONE' });
+    ).toEqual({ completed: true, queuedThreadCount: 0 });
+
+    database.enqueuePullRequest({
+      ...baseJob,
+      deliveryId: 'delivery-failed-before-association',
+      headSha: 'c'.repeat(40),
+    });
+    const failedJob = database.claimNextJob();
+    if (failedJob === undefined) {
+      throw new Error('expected a failed resolution job');
+    }
+    const failedResult: ReviewResult = {
+      ...emptyResult,
+      finding_updates: [{ evidence: 'Unverified newer evidence.', fingerprint, status: 'fixed' }],
+    };
+    database.recordReviewArtifact(failedJob.id, failedResult);
+    database.reconcileFindings({
+      job: failedJob,
+      previousResult: fixedResult,
+      result: failedResult,
+    });
+    database.updateJob({ id: failedJob.id, state: 'FAILED' });
 
     database.recordGitHubThreadAssociation({
       commentNodeId: 'PRRC_late',
@@ -506,7 +528,7 @@ describe('JobDatabase', () => {
     database.close();
   });
 
-  it('supersedes pending resolution work with the newest verified fix', () => {
+  it('supersedes pending resolution work only after the newer fix job completes', () => {
     const database = new JobDatabase(':memory:');
     const fingerprint = '1234567890abcdef';
     database.enqueuePullRequest(baseJob);
@@ -531,16 +553,17 @@ describe('JobDatabase', () => {
       if (job === undefined) {
         throw new Error('expected a resolution job');
       }
+      database.updateJob({ id: job.id, state: 'PUBLISHING' });
       expect(
-        database.queueFixedFindingResolutions({
+        database.completeReviewJob({
+          attempt: job.attempt ?? 0,
           headSha,
           jobId: job.id,
           pullRequestNumber: job.pullRequestNumber,
           repository: job.repository,
           updates: [{ evidence, fingerprint, status: 'fixed' }],
         }),
-      ).toBe(1);
-      database.updateJob({ id: job.id, state: 'DONE' });
+      ).toEqual({ completed: true, queuedThreadCount: 1 });
       return job;
     };
 
@@ -549,7 +572,22 @@ describe('JobDatabase', () => {
     if (olderPending === undefined) {
       throw new Error('expected older pending resolution');
     }
-    const newerJob = queueFix('delivery-newer-fix', 'c'.repeat(40), 'Newest fix evidence.');
+    database.enqueuePullRequest({
+      ...baseJob,
+      deliveryId: 'delivery-failed-fix',
+      headSha: 'c'.repeat(40),
+    });
+    const failedJob = database.claimNextJob();
+    if (failedJob === undefined) {
+      throw new Error('expected a failed resolution job');
+    }
+    database.updateJob({ id: failedJob.id, state: 'FAILED' });
+    expect(database.nextPendingThreadResolution()).toMatchObject({
+      evidence: 'Older fix evidence.',
+      jobId: olderJob.id,
+    });
+
+    const newerJob = queueFix('delivery-newer-fix', 'd'.repeat(40), 'Newest fix evidence.');
 
     database.failThreadResolution({
       error: 'stale worker failure',

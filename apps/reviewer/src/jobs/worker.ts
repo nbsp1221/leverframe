@@ -387,10 +387,6 @@ export class ReviewWorker {
         reviewMode,
         signal: controller.signal,
       });
-      const queuedThreadCount = this.#queueFixedFindingThreads({
-        job,
-        result: review.result,
-      });
       controller.signal.throwIfAborted();
       const detailsUrl = reviewDetailsUrl(job, reviewId, statusCommentId);
       await github.completeCheckRun({
@@ -405,7 +401,7 @@ export class ReviewWorker {
                 ? `${stillPresentCount} previously reported ${stillPresentCount === 1 ? 'finding remains' : 'findings remain'} unresolved.`
                 : 'No new findings were identified in the incremental changes.'
               : `Published ${findingCount} ${findingLabel} in GitHub review ${reviewId}.`
-          }${queuedThreadCount === 0 ? '' : `\n\n${queuedThreadCount} fixed review ${queuedThreadCount === 1 ? 'thread was' : 'threads were'} queued for resolution.`}`,
+          }`,
           title:
             findingCount === 0
               ? stillPresentCount > 0
@@ -426,7 +422,6 @@ export class ReviewWorker {
           reviewBaseSha,
           reviewId,
           reviewMode,
-          pendingThreadResolutionCount: queuedThreadCount,
           resolvedThreadCount: 0,
         }),
         github,
@@ -434,11 +429,13 @@ export class ReviewWorker {
         statusCommentId,
       });
       controller.signal.throwIfAborted();
-      const completed = this.options.database.updateJob({
+      const { completed } = this.options.database.completeReviewJob({
         attempt: job.attempt ?? 0,
-        expectedStates: ['PUBLISHING'],
-        id: job.id,
-        state: 'DONE',
+        headSha: job.headSha,
+        jobId: job.id,
+        pullRequestNumber: job.pullRequestNumber,
+        repository: job.repository,
+        updates: review.result.finding_updates ?? [],
       });
       if (!completed) {
         throw new Error('review job could not enter DONE');
@@ -622,19 +619,6 @@ export class ReviewWorker {
       reviewDatabaseId: reviewId,
     });
     return reviewId;
-  }
-
-  #queueFixedFindingThreads(input: { job: ReviewJob; result: ReviewResult }): number {
-    if (input.result.finding_updates === undefined) {
-      return 0;
-    }
-    return this.options.database.queueFixedFindingResolutions({
-      headSha: input.job.headSha,
-      jobId: input.job.id,
-      pullRequestNumber: input.job.pullRequestNumber,
-      repository: input.job.repository,
-      updates: input.result.finding_updates,
-    });
   }
 
   async #loadPolicyInstructions(input: {
