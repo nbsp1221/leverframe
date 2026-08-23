@@ -25,7 +25,11 @@ import { ActivityIcon, ChevronDownIcon, TerminalIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { applyExecutionEvent, isTerminalExecution } from './review-execution-state';
+import {
+  applyExecutionEvent,
+  isTerminalExecution,
+  shouldRefreshForTerminalSnapshot,
+} from './review-execution-state';
 
 type ConnectionState = 'loading' | 'live' | 'reconnecting' | 'closed' | 'error';
 type Translator = ReturnType<typeof useTranslations>;
@@ -49,6 +53,13 @@ export function ReviewExecutionTrace({ reviewId }: { reviewId: number }) {
     let handleTrace: ((message: MessageEvent) => void) | undefined;
     let handleSnapshot: ((message: MessageEvent) => void) | undefined;
 
+    function refreshForTerminalSnapshot(status: ReviewExecutionSnapshot['status']) {
+      if (shouldRefreshForTerminalSnapshot(status, refreshedRef.current)) {
+        refreshedRef.current = true;
+        router.refresh();
+      }
+    }
+
     async function connect() {
       try {
         const response = await fetch(`/api/v1/reviews/${reviewId}/execution`, {
@@ -64,6 +75,7 @@ export function ReviewExecutionTrace({ reviewId }: { reviewId: number }) {
         setSnapshot(parsed.data);
         if (isTerminalExecution(parsed.data.status)) {
           setConnection('closed');
+          refreshForTerminalSnapshot(parsed.data.status);
           return;
         }
         source = new EventSource(
@@ -98,10 +110,7 @@ export function ReviewExecutionTrace({ reviewId }: { reviewId: number }) {
             if (isTerminalExecution(next.status)) {
               source?.close();
               setConnection('closed');
-              if (!refreshedRef.current) {
-                refreshedRef.current = true;
-                router.refresh();
-              }
+              refreshForTerminalSnapshot(next.status);
             }
           } catch {
             // A later valid snapshot or route refresh can recover this best-effort panel.

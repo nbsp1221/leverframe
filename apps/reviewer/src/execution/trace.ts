@@ -7,6 +7,7 @@ const TRACE_FILE = 'execution-trace.jsonl';
 const TRACE_SCHEMA_VERSION = 1 as const;
 const MAX_TRACE_BYTES = 4 * 1024 * 1024;
 const MAX_TRACE_EVENTS = 512;
+const LIMIT_NOTICE_RESERVED_BYTES = 512;
 const MAX_COMMAND_BYTES = 2 * 1024;
 const MAX_MESSAGE_BYTES = 4 * 1024;
 const MAX_OUTPUT_BYTES = 16 * 1024;
@@ -64,7 +65,10 @@ export class ExecutionTraceStore {
       const event = this.#event(state.sequence + 1, attempt, input);
       const line = `${JSON.stringify(event)}\n`;
       const lineBytes = Buffer.byteLength(line);
-      if (state.count >= MAX_TRACE_EVENTS - 1 || state.bytes + lineBytes > MAX_TRACE_BYTES) {
+      if (
+        state.count >= MAX_TRACE_EVENTS - 1 ||
+        state.bytes + lineBytes > MAX_TRACE_BYTES - LIMIT_NOTICE_RESERVED_BYTES
+      ) {
         this.#appendLimitNotice(jobId, attempt, state);
         return undefined;
       }

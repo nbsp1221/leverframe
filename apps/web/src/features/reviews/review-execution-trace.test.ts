@@ -5,7 +5,7 @@ import {
   reviewExecutionSnapshotSchema,
 } from '@repo/contracts';
 import { describe, expect, it } from 'vitest';
-import { applyExecutionEvent } from './review-execution-state';
+import { applyExecutionEvent, shouldRefreshForTerminalSnapshot } from './review-execution-state';
 
 const snapshot: ReviewExecutionSnapshot = reviewExecutionSnapshotSchema.parse({
   review_id: 42,
@@ -74,5 +74,11 @@ describe('review execution state', () => {
     );
     expect(completed.current_command).toBeNull();
     expect(completed.last_activity_at).toBe('2026-08-24T00:00:03.000Z');
+  });
+
+  it('refreshes once when the first client snapshot is already terminal', () => {
+    expect(shouldRefreshForTerminalSnapshot('completed', false)).toBe(true);
+    expect(shouldRefreshForTerminalSnapshot('completed', true)).toBe(false);
+    expect(shouldRefreshForTerminalSnapshot('running', false)).toBe(false);
   });
 });

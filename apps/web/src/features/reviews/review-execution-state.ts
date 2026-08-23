@@ -39,3 +39,10 @@ export function applyExecutionEvent(
 export function isTerminalExecution(status: ReviewExecutionSnapshot['status']): boolean {
   return ['completed', 'failed', 'superseded', 'cancelled'].includes(status);
 }
+
+export function shouldRefreshForTerminalSnapshot(
+  status: ReviewExecutionSnapshot['status'],
+  refreshed: boolean,
+): boolean {
+  return !refreshed && isTerminalExecution(status);
+}

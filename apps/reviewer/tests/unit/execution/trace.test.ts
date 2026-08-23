@@ -82,14 +82,15 @@ describe('execution trace', () => {
     expect(messages).toEqual(['Checking tests.']);
   });
 
-  it('redacts credentials and retains only the output tail', () => {
+  it('redacts environment and sandbox credentials while retaining only the output tail', () => {
     const store = fixture({ REVIEW_TOKEN: 'super-secret-value' });
     store.append(9, 1, {
       type: 'command_completed',
-      output: `${'x'.repeat(executionTraceLimits.outputBytes)}super-secret-value`,
+      output: `${'x'.repeat(executionTraceLimits.outputBytes)} REVIEW_TOKEN=super-secret-value OPENAI_API_KEY=sk-proj-${'a'.repeat(40)}`,
     });
     const event = store.read(9, 1).events[0];
     expect(event?.output).not.toContain('super-secret-value');
+    expect(event?.output).not.toContain('sk-proj-');
     expect(event?.output).toContain('[REDACTED]');
     expect(event?.output_truncated).toBe(true);
     expect(Buffer.byteLength(event?.output ?? '')).toBeLessThanOrEqual(
@@ -121,15 +122,39 @@ describe('execution trace', () => {
     );
     recorder.write('x'.repeat(1024 * 1024 + 1));
     recorder.write('\n');
-    recorder.stop();
-    const snapshot = store.read(12, 1);
-    expect(snapshot.currentCommand).toBeNull();
-    expect(snapshot.events).toEqual(
+    const liveSnapshot = store.read(12, 1);
+    expect(liveSnapshot.currentCommand).toBeNull();
+    expect(liveSnapshot.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ notice_code: 'OVERSIZED_CODEX_EVENT' }),
-        expect.objectContaining({ type: 'command_completed', status: 'interrupted' }),
+        expect.objectContaining({ type: 'command_completed', status: 'event_omitted' }),
       ]),
     );
+    recorder.stop();
+    expect(
+      store
+        .read(12, 1)
+        .events.filter((event) => event.type === 'command_completed' && event.item_id === 'cmd'),
+    ).toHaveLength(1);
+  });
+
+  it('persists the trace-limit notice when the byte limit is reached', () => {
+    const store = fixture();
+    for (let index = 0; index < executionTraceLimits.eventCount; index += 1) {
+      store.append(16, 1, {
+        type: 'command_completed',
+        itemId: String(index),
+        output: 'x'.repeat(executionTraceLimits.outputBytes),
+      });
+    }
+
+    const snapshot = store.read(16, 1);
+    expect(snapshot.traceTruncated).toBe(true);
+    expect(snapshot.events.at(-1)).toMatchObject({
+      type: 'trace_notice',
+      notice_code: 'TRACE_LIMIT_REACHED',
+    });
+    expect(new ExecutionTraceStore(store.jobsDirectory, {}).read(16, 1).traceTruncated).toBe(true);
   });
 
   it('removes configured host paths before persistence', () => {

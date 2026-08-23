@@ -225,6 +225,7 @@ export class CodexExecutionRecorder {
   }
 
   #recordOversizedNotice(): void {
+    this.#completeOrphanCommands('event_omitted');
     if (this.#oversizedNoticeWritten) {
       return;
     }
