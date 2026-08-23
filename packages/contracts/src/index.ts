@@ -125,6 +125,17 @@ export const reviewFindingSchema = z.object({
   file: z.string(),
   line: z.number().int().positive(),
   state: z.enum(['open', 'fixed', 'still_present']).nullable(),
+  thread_resolution: z
+    .object({
+      state: z.enum(['open', 'pending', 'resolved', 'failed']),
+      resolved_at: isoDate.nullable(),
+      resolved_head_sha: z
+        .string()
+        .regex(/^[0-9a-f]{40}$/)
+        .nullable(),
+      last_error: z.string().nullable(),
+    })
+    .nullable(),
   evaluation: findingVerdictSchema.nullable(),
 });
 

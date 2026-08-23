@@ -181,9 +181,15 @@ export function detailResponse(c: Context, database: JobDatabase, id: number) {
       .getReviewFindings(job.repository, job.pullRequestNumber)
       .map((finding) => [finding.fingerprint, finding]),
   );
+  const threadStatuses = new Map(
+    database
+      .getFindingThreadStatuses(job.repository, job.pullRequestNumber)
+      .map((status) => [status.fingerprint, status]),
+  );
   const findings =
     lifecycle?.findings.map((finding) => {
       const fingerprint = findingFingerprint(finding);
+      const threadStatus = threadStatuses.get(fingerprint);
       return {
         fingerprint,
         severity: finding.severity,
@@ -195,6 +201,15 @@ export function detailResponse(c: Context, database: JobDatabase, id: number) {
         file: finding.file,
         line: finding.line,
         state: known.get(fingerprint)?.state.toLowerCase() ?? null,
+        thread_resolution:
+          threadStatus === undefined
+            ? null
+            : {
+                state: mapThreadResolutionState(threadStatus.resolutionState),
+                resolved_at: threadStatus.resolvedAt ?? null,
+                resolved_head_sha: threadStatus.resolvedHeadSha ?? null,
+                last_error: threadStatus.lastError ?? null,
+              },
         evaluation: database.getCurrentEvaluation(id, 'finding', fingerprint)?.verdict ?? null,
       };
     }) ?? [];
@@ -238,4 +253,19 @@ export function detailResponse(c: Context, database: JobDatabase, id: number) {
     review_evaluation: mapEvaluation(database.getCurrentEvaluation(id, 'review')),
   });
   return json(c, response);
+}
+
+function mapThreadResolutionState(
+  state: 'OPEN' | 'RESOLUTION_FAILED' | 'RESOLUTION_PENDING' | 'RESOLVED',
+): 'failed' | 'open' | 'pending' | 'resolved' {
+  switch (state) {
+    case 'OPEN':
+      return 'open';
+    case 'RESOLUTION_PENDING':
+      return 'pending';
+    case 'RESOLVED':
+      return 'resolved';
+    case 'RESOLUTION_FAILED':
+      return 'failed';
+  }
 }

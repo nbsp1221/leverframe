@@ -11,6 +11,12 @@ import {
   type ReviewVerdict,
 } from '../storage/evaluation-repository.js';
 import { redactFailureExcerpt } from '../storage/failure.js';
+import {
+  type FindingThreadStatus,
+  GitHubThreadRepository,
+  type PendingThreadAssociation,
+  type PendingThreadResolution,
+} from '../storage/github-thread-repository.js';
 import { runMigrations, schemaVersion } from '../storage/migrations/index.js';
 import {
   type PreviousReview,
@@ -58,9 +64,14 @@ export interface CancellationResult {
   jobsCancelled: number;
 }
 
+export interface PersistedCancellation {
+  reason?: string;
+  state: 'CANCELLED' | 'SUPERSEDED';
+}
+
 export interface ReviewJob extends PullRequestJobInput {
   /**
-   * Monotonically increasing claim/revival token used to reject stale worker
+   * Monotonically increasing claim/requeue token used to reject stale worker
    * updates. Jobs created before this column existed are assigned zero and
    * receive their first token when claimed.
    */
@@ -152,6 +163,7 @@ export interface ReviewDetailRow extends ReviewJob {
 export class JobDatabase {
   readonly #database: DatabaseSync;
   readonly #evaluationRepository: EvaluationRepository;
+  readonly #githubThreadRepository: GitHubThreadRepository;
   readonly #reviewRepository: ReviewRepository;
 
   constructor(path: string, options: { dataRoot?: string } = {}) {
@@ -161,6 +173,7 @@ export class JobDatabase {
     this.#database = openDatabase(path);
     runMigrations(this.#database);
     this.#reviewRepository = new ReviewRepository(this.#database, dataRoot);
+    this.#githubThreadRepository = new GitHubThreadRepository(this.#database);
     this.#evaluationRepository = new EvaluationRepository(this.#database, (jobId) =>
       this.getReviewArtifact(jobId),
     );
@@ -187,7 +200,7 @@ export class JobDatabase {
       VALUES (?, ?)
     `);
     const insertJob = this.#database.prepare(`
-      INSERT OR IGNORE INTO review_jobs (
+      INSERT INTO review_jobs (
         repository,
         pull_request_number,
         head_sha,
@@ -201,27 +214,15 @@ export class JobDatabase {
         schema_version, schema_hash
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const reviveJob = this.#database.prepare(`
-      UPDATE review_jobs
-      SET installation_id = ?, action = ?, delivery_id = ?, state = 'QUEUED',
-          attempt = attempt + 1,
-          error = NULL, check_run_id = NULL, result_path = NULL,
-          published_review_id = NULL,
-          base_sha = NULL, pull_request_title = NULL,
-          model = NULL, reasoning = NULL,
-          prompt_version = NULL, prompt_hash = NULL,
-          schema_version = NULL, schema_hash = NULL,
-          review_started_at = NULL, review_completed_at = NULL,
-          publication_started_at = NULL, published_at = NULL,
-          superseded_by_job_id = NULL,
-          error_code = NULL, error_excerpt = NULL, artifact_hash = NULL,
-          created_at = ?, updated_at = ?
+    const latestMatchingJob = this.#database.prepare(`
+      SELECT state
+      FROM review_jobs
       WHERE repository = ?
         AND pull_request_number = ?
         AND head_sha = ?
         AND policy_version = ?
-        AND state IN ('CANCELLED', 'SUPERSEDED')
-      RETURNING id
+      ORDER BY id DESC
+      LIMIT 1
     `);
     const supersedeOlderQueuedJobs = this.#database.prepare(`
       UPDATE review_jobs
@@ -240,43 +241,35 @@ export class JobDatabase {
         return { deliveryAccepted: false, jobCreated: false, jobsSuperseded: 0 };
       }
 
-      const insertedJob = insertJob.run(
+      const latest = latestMatchingJob.get(
         input.repository,
         input.pullRequestNumber,
         input.headSha,
         input.policyVersion,
-        input.installationId,
-        input.action,
-        input.deliveryId,
-        now,
-        now,
-        input.baseSha ?? null,
-        input.pullRequestTitle ?? null,
-        input.model ?? null,
-        input.reasoning ?? null,
-        input.promptVersion ?? null,
-        input.promptHash ?? null,
-        input.schemaVersion ?? null,
-        input.schemaHash ?? null,
-      );
-      const revivedJob =
-        insertedJob.changes === 0
-          ? (reviveJob.get(
-              input.installationId,
-              input.action,
-              input.deliveryId,
-              now,
-              now,
-              input.repository,
-              input.pullRequestNumber,
-              input.headSha,
-              input.policyVersion,
-            ) as { id: number } | undefined)
-          : undefined;
-      if (revivedJob !== undefined) {
-        this.#database.prepare('DELETE FROM review_artifacts WHERE job_id = ?').run(revivedJob.id);
+      ) as { state: string } | undefined;
+      const jobCreated =
+        latest === undefined || latest.state === 'CANCELLED' || latest.state === 'SUPERSEDED';
+      if (jobCreated) {
+        insertJob.run(
+          input.repository,
+          input.pullRequestNumber,
+          input.headSha,
+          input.policyVersion,
+          input.installationId,
+          input.action,
+          input.deliveryId,
+          now,
+          now,
+          input.baseSha ?? null,
+          input.pullRequestTitle ?? null,
+          input.model ?? null,
+          input.reasoning ?? null,
+          input.promptVersion ?? null,
+          input.promptHash ?? null,
+          input.schemaVersion ?? null,
+          input.schemaHash ?? null,
+        );
       }
-      const jobCreated = insertedJob.changes === 1 || revivedJob !== undefined;
       const superseded = jobCreated
         ? supersedeOlderQueuedJobs.run(
             now,
@@ -301,7 +294,9 @@ export class JobDatabase {
   cancelPullRequest(input: PullRequestCancellationInput): CancellationResult {
     const now = new Date().toISOString();
     const reason =
-      input.action === 'closed' ? 'Pull request closed.' : 'Pull request converted to draft.';
+      input.action === 'closed'
+        ? 'The pull request was closed.'
+        : 'The pull request was converted to draft.';
 
     this.#database.exec('BEGIN IMMEDIATE');
     try {
@@ -425,6 +420,22 @@ export class JobDatabase {
       ...(row.superseded_by_job_id === null || row.superseded_by_job_id === undefined
         ? {}
         : { supersededByJobId: Number(row.superseded_by_job_id) }),
+    };
+  }
+
+  getJobCancellation(input: { attempt: number; jobId: number }): PersistedCancellation | undefined {
+    const row = this.#database
+      .prepare(`
+        SELECT state, error FROM review_jobs
+        WHERE id = ? AND attempt = ? AND state IN ('CANCELLED', 'SUPERSEDED')
+      `)
+      .get(input.jobId, input.attempt) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      ...(typeof row.error === 'string' ? { reason: row.error } : {}),
+      state: String(row.state) as PersistedCancellation['state'],
     };
   }
 
@@ -564,6 +575,118 @@ export class JobDatabase {
 
   getReviewFindings(repository: string, pullRequestNumber: number): ReviewFinding[] {
     return this.#reviewRepository.getReviewFindings(repository, pullRequestNumber);
+  }
+
+  recordGitHubThreadAssociation(input: {
+    commentNodeId: string;
+    fingerprint: string;
+    jobId: number;
+    pullRequestNumber: number;
+    repository: string;
+    reviewDatabaseId: string;
+    threadNodeId: string;
+  }): void {
+    this.#githubThreadRepository.recordAssociation(input);
+  }
+
+  queueGitHubThreadAssociation(input: {
+    expectedFingerprints: readonly string[];
+    jobId: number;
+    pullRequestNumber: number;
+    repository: string;
+    reviewDatabaseId: number;
+  }): void {
+    this.#githubThreadRepository.queueAssociation(input);
+  }
+
+  nextPendingGitHubThreadAssociation(): PendingThreadAssociation | undefined {
+    return this.#githubThreadRepository.nextPendingAssociation();
+  }
+
+  remainingGitHubThreadAssociationFingerprints(jobId: number): string[] {
+    return this.#githubThreadRepository.remainingAssociationFingerprints(jobId);
+  }
+
+  completeGitHubThreadAssociation(jobId: number): void {
+    this.#githubThreadRepository.completeAssociation(jobId);
+  }
+
+  retryGitHubThreadAssociation(input: {
+    jobId: number;
+    error: string;
+    delayMilliseconds: number;
+  }): void {
+    this.#githubThreadRepository.retryAssociation(input);
+  }
+
+  failGitHubThreadAssociation(input: {
+    jobId: number;
+    error: string;
+    retryDelayMilliseconds: number;
+  }): void {
+    this.#githubThreadRepository.failAssociation(input);
+  }
+
+  completeReviewJob(input: {
+    attempt: number;
+    headSha: string;
+    jobId: number;
+    pullRequestNumber: number;
+    repository: string;
+    updates: NonNullable<ReviewResult['finding_updates']>;
+  }): { completed: boolean; queuedThreadCount: number } {
+    this.#database.exec('BEGIN IMMEDIATE');
+    try {
+      const completed = this.updateJob({
+        attempt: input.attempt,
+        expectedStates: ['PUBLISHING'],
+        id: input.jobId,
+        state: 'DONE',
+      });
+      const queuedThreadCount = completed
+        ? this.#githubThreadRepository.queueFixedFindingsForCompletedJob(input)
+        : 0;
+      this.#database.exec('COMMIT');
+      return { completed, queuedThreadCount };
+    } catch (error) {
+      this.#database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  nextPendingThreadResolution(jobId?: number): PendingThreadResolution | undefined {
+    return this.#githubThreadRepository.nextPendingResolution(jobId);
+  }
+
+  markThreadResolved(input: {
+    id: number;
+    jobId: number;
+    resolutionCommentNodeId?: string;
+    resolvedAt?: string;
+  }): void {
+    this.#githubThreadRepository.markResolved(input);
+  }
+
+  retryThreadResolution(input: {
+    id: number;
+    jobId: number;
+    error: string;
+    delayMilliseconds: number;
+  }): void {
+    this.#githubThreadRepository.markRetry(input);
+  }
+
+  failThreadResolution(input: {
+    id: number;
+    jobId: number;
+    error: string;
+    retryDelayMilliseconds: number;
+  }): void {
+    this.#githubThreadRepository.markFailed(input);
+  }
+
+  getFindingThreadStatuses(repository: string, pullRequestNumber: number): FindingThreadStatus[] {
+    return this.#githubThreadRepository.listStatuses(repository, pullRequestNumber);
   }
 
   activatePullRequestJob(job: ReviewJob): PullRequestState {

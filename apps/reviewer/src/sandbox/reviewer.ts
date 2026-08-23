@@ -7,6 +7,7 @@ import {
   findingFingerprint,
   removePreviouslyReportedFindings,
   reviewResultSchema,
+  validateFindingUpdates,
 } from '../review/result.js';
 import { runProcess } from '../system/process.js';
 
@@ -215,7 +216,12 @@ export class SandboxReviewer {
         timeoutMilliseconds: 60_000,
       });
       const rawResult = reviewResultSchema.parse(JSON.parse(output.stdout));
-      const result = removePreviouslyReportedFindings(rawResult, previousResult, changedFiles);
+      const validatedResult = validateFindingUpdates(rawResult, previousResult);
+      const result = removePreviouslyReportedFindings(
+        validatedResult,
+        previousResult,
+        changedFiles,
+      );
       const resultPath = join(input.jobDirectory, 'review-result.json');
       writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`, {
         mode: 0o600,

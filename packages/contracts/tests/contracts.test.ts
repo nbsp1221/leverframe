@@ -4,6 +4,7 @@ import {
   findingEvaluationWriteRequestSchema,
   findingParamsSchema,
   reviewEvaluationWriteRequestSchema,
+  reviewFindingSchema,
   reviewIdParamsSchema,
   reviewListQuerySchema,
 } from '../src/index.js';
@@ -59,6 +60,35 @@ describe('review API request contracts', () => {
     ).toBe(true);
     expect(
       findingEvaluationWriteRequestSchema.safeParse({ ...common, verdict: 'useful' }).success,
+    ).toBe(false);
+  });
+
+  it('validates GitHub thread resolution state separately from finding state', () => {
+    const finding = {
+      fingerprint: '0123456789abcdef',
+      severity: 'high',
+      confidence: 'high',
+      title: 'A finding',
+      explanation: 'Explanation',
+      suggested_action: 'Fix it',
+      evidence: 'Evidence',
+      file: 'src/example.ts',
+      line: 12,
+      state: 'fixed',
+      thread_resolution: {
+        state: 'resolved',
+        resolved_at: '2026-08-23T00:00:00.000Z',
+        resolved_head_sha: 'a'.repeat(40),
+        last_error: null,
+      },
+      evaluation: null,
+    };
+    expect(reviewFindingSchema.parse(finding).thread_resolution?.state).toBe('resolved');
+    expect(
+      reviewFindingSchema.safeParse({
+        ...finding,
+        thread_resolution: { ...finding.thread_resolution, state: 'unknown' },
+      }).success,
     ).toBe(false);
   });
 

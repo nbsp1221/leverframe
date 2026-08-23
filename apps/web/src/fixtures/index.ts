@@ -374,6 +374,15 @@ export function fixtureDetailResponse(
             : state.scenario === 'finding-still-present'
               ? ('still_present' as const)
               : ('open' as const),
+        thread_resolution:
+          state.scenario === 'finding-fixed'
+            ? {
+                state: 'resolved' as const,
+                resolved_at: '2026-08-23T00:00:00.000Z',
+                resolved_head_sha: item.head_sha,
+                last_error: null,
+              }
+            : null,
         evaluation:
           item.evaluated_findings > index && item.review_evaluation !== null
             ? ('valid' as const)

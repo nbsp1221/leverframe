@@ -1,5 +1,4 @@
 import { App } from '@octokit/app';
-import type { ReviewInlineComment } from '../review/publication.js';
 import type { ReviewResult } from '../review/result.js';
 import {
   commandReplyMarker,
@@ -7,8 +6,14 @@ import {
   reviewPublicationMarker,
   statusCommentMarker,
 } from '../identity.js';
+import {
+  type ReviewInlineComment,
+  findingPublicationMarker,
+  parseFindingPublicationMarker,
+} from '../review/publication.js';
 import { renderReview } from '../review/result.js';
 import type { GitHubAppCredentials } from './credentials.js';
+import { withGitHubRetry } from './retry.js';
 
 const maximumGitHubBodyCharacters = 60_000;
 
@@ -28,6 +33,11 @@ export interface FindingContext {
   content: string;
   startLine: number;
   endLine: number;
+}
+
+export interface ReviewPublicationResult {
+  publishedInlineFingerprints: readonly string[];
+  reviewId: number;
 }
 
 export type CheckConclusion = 'cancelled' | 'failure' | 'neutral' | 'success' | 'timed_out';
@@ -388,7 +398,8 @@ export class GitHubAppClient {
     repository: string;
     result: ReviewResult;
     signal: AbortSignal;
-  }): Promise<number> {
+    knownReviewId?: number;
+  }): Promise<ReviewPublicationResult> {
     const [owner, repository] = splitRepository(input.repository);
     const octokit = await this.#app.getInstallationOctokit(input.installationId);
     const pullRequest = await this.#withRetry(() =>
@@ -405,6 +416,23 @@ export class GitHubAppClient {
     }
 
     const marker = reviewPublicationMarker(input.jobId, input.expectedHeadSha);
+    const expectedFingerprints = new Set(
+      (input.inlineComments ?? []).map((comment) => comment.fingerprint),
+    );
+    if (input.knownReviewId !== undefined) {
+      return {
+        publishedInlineFingerprints: await this.#findPublishedInlineFingerprints({
+          expectedFingerprints,
+          jobId: input.jobId,
+          octokit,
+          owner,
+          pullRequestNumber: input.pullRequestNumber,
+          repository,
+          reviewId: input.knownReviewId,
+        }),
+        reviewId: input.knownReviewId,
+      };
+    }
     const existingId = await this.#findReview({
       marker,
       octokit,
@@ -413,7 +441,18 @@ export class GitHubAppClient {
       repository,
     });
     if (existingId !== undefined) {
-      return existingId;
+      return {
+        publishedInlineFingerprints: await this.#findPublishedInlineFingerprints({
+          expectedFingerprints,
+          jobId: input.jobId,
+          octokit,
+          owner,
+          pullRequestNumber: input.pullRequestNumber,
+          repository,
+          reviewId: existingId,
+        }),
+        reviewId: existingId,
+      };
     }
 
     const inlineComments = input.inlineComments ?? [];
@@ -425,7 +464,7 @@ export class GitHubAppClient {
         {
           body,
           comments: inlineComments.map((comment) => ({
-            body: limitGitHubBody(comment.body),
+            body: renderMarkedInlineBody(comment, input.jobId),
             line: comment.line,
             path: comment.path,
             side: 'RIGHT' as const,
@@ -438,7 +477,10 @@ export class GitHubAppClient {
           repo: repository,
         },
       );
-      return Number(review.data.id);
+      return {
+        publishedInlineFingerprints: [...expectedFingerprints],
+        reviewId: Number(review.data.id),
+      };
     } catch (error) {
       const reconciledId = await this.#findReview({
         marker,
@@ -448,11 +490,22 @@ export class GitHubAppClient {
         repository,
       });
       if (reconciledId !== undefined) {
-        return reconciledId;
+        return {
+          publishedInlineFingerprints: await this.#findPublishedInlineFingerprints({
+            expectedFingerprints,
+            jobId: input.jobId,
+            octokit,
+            owner,
+            pullRequestNumber: input.pullRequestNumber,
+            repository,
+            reviewId: reconciledId,
+          }),
+          reviewId: reconciledId,
+        };
       }
       if (githubErrorStatus(error) === 422 && inlineComments.length > 0) {
         input.signal.throwIfAborted();
-        return this.#publishSummaryFallback({
+        const reviewId = await this.#publishSummaryFallback({
           body: bodyWithMarker(renderReview(input.result), marker),
           expectedHeadSha: input.expectedHeadSha,
           marker,
@@ -462,6 +515,7 @@ export class GitHubAppClient {
           repository,
           signal: input.signal,
         });
+        return { publishedInlineFingerprints: [], reviewId };
       }
       throw error;
     }
@@ -492,6 +546,53 @@ export class GitHubAppClient {
         return undefined;
       }
     }
+  }
+
+  async #findPublishedInlineFingerprints(input: {
+    expectedFingerprints: ReadonlySet<string>;
+    jobId: number;
+    octokit: Awaited<ReturnType<App['getInstallationOctokit']>>;
+    owner: string;
+    pullRequestNumber: number;
+    repository: string;
+    reviewId: number;
+  }): Promise<string[]> {
+    const inspect = async (attempt: number): Promise<string[]> => {
+      const fingerprints = new Set<string>();
+      for (let page = 1; ; page += 1) {
+        const response = await this.#withRetry(() =>
+          input.octokit.request(
+            'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
+            {
+              owner: input.owner,
+              page,
+              per_page: 100,
+              pull_number: input.pullRequestNumber,
+              repo: input.repository,
+              review_id: input.reviewId,
+            },
+          ),
+        );
+        for (const comment of response.data) {
+          const marker = parseFindingPublicationMarker(comment.body);
+          if (marker?.jobId === input.jobId && input.expectedFingerprints.has(marker.fingerprint)) {
+            fingerprints.add(marker.fingerprint);
+          }
+        }
+        if (response.data.length < 100) {
+          break;
+        }
+      }
+      if (fingerprints.size === input.expectedFingerprints.size || attempt === 2) {
+        return [...fingerprints];
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 250 * 2 ** attempt);
+      });
+      return inspect(attempt + 1);
+    };
+
+    return inspect(0);
   }
 
   async #updateCheckRun(input: {
@@ -606,19 +707,7 @@ export class GitHubAppClient {
   }
 
   async #withRetry<T>(operation: () => Promise<T>): Promise<T> {
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        return await operation();
-      } catch (error) {
-        const delayMilliseconds = githubRetryDelayMilliseconds(error, attempt);
-        if (delayMilliseconds === undefined || attempt >= 2) {
-          throw error;
-        }
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, delayMilliseconds);
-        });
-      }
-    }
+    return withGitHubRetry(operation);
   }
 }
 
@@ -696,42 +785,6 @@ export function limitGitHubBody(
   return `${value.slice(0, Math.max(0, maximumCharacters - notice.length))}${notice}`;
 }
 
-export function githubRetryDelayMilliseconds(error: unknown, attempt: number): number | undefined {
-  const record = asRecord(error);
-  const response = asRecord(record?.response);
-  const headers = asRecord(response?.headers);
-  const status = typeof record?.status === 'number' ? record.status : undefined;
-  const retryAfterSeconds = numericHeader(headers?.['retry-after']);
-  if (status === 429 || status === 502 || status === 503 || status === 504) {
-    return Math.min(
-      30_000,
-      retryAfterSeconds === undefined ? 500 * 2 ** attempt : retryAfterSeconds * 1_000,
-    );
-  }
-  if (
-    status === 403 &&
-    (retryAfterSeconds !== undefined || String(headers?.['x-ratelimit-remaining']) === '0')
-  ) {
-    const resetAtSeconds = numericHeader(headers?.['x-ratelimit-reset']);
-    const resetDelay =
-      resetAtSeconds === undefined ? undefined : resetAtSeconds * 1_000 - Date.now();
-    return Math.min(
-      30_000,
-      Math.max(
-        0,
-        retryAfterSeconds === undefined
-          ? (resetDelay ?? 1_000 * 2 ** attempt)
-          : retryAfterSeconds * 1_000,
-      ),
-    );
-  }
-
-  const code = typeof record?.code === 'string' ? record.code : undefined;
-  return code !== undefined && ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT'].includes(code)
-    ? 500 * 2 ** attempt
-    : undefined;
-}
-
 export function canManageRepositoryRole(role: string): boolean {
   return ['admin', 'maintain', 'triage', 'write'].includes(role);
 }
@@ -742,12 +795,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function numericHeader(value: unknown): number | undefined {
-  const parsed =
-    typeof value === 'string' || typeof value === 'number' ? Number(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
 function githubErrorStatus(error: unknown): number | undefined {
   const record = asRecord(error);
   return typeof record?.status === 'number' ? record.status : undefined;
@@ -756,6 +803,14 @@ function githubErrorStatus(error: unknown): number | undefined {
 function bodyWithMarker(body: string, marker: string): string {
   const suffix = `\n\n${marker}`;
   return `${limitGitHubBody(body, maximumGitHubBodyCharacters - suffix.length)}${suffix}`;
+}
+
+function renderMarkedInlineBody(comment: ReviewInlineComment, jobId: number): string {
+  const marker = findingPublicationMarker(jobId, comment.fingerprint);
+  if (!comment.body.endsWith(marker)) {
+    throw new Error(`inline finding ${comment.fingerprint} is missing its trusted marker`);
+  }
+  return bodyWithMarker(comment.body.slice(0, -marker.length).trimEnd(), marker);
 }
 
 function splitRepository(value: string): [string, string] {

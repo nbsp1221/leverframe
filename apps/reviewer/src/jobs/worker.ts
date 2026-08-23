@@ -395,12 +395,13 @@ export class ReviewWorker {
         detailsUrl,
         installationId: job.installationId,
         output: {
-          summary:
+          summary: `${
             reviewId === undefined
               ? stillPresentCount > 0
                 ? `${stillPresentCount} previously reported ${stillPresentCount === 1 ? 'finding remains' : 'findings remain'} unresolved.`
                 : 'No new findings were identified in the incremental changes.'
-              : `Published ${findingCount} ${findingLabel} in GitHub review ${reviewId}.`,
+              : `Published ${findingCount} ${findingLabel} in GitHub review ${reviewId}.`
+          }`,
           title:
             findingCount === 0
               ? stillPresentCount > 0
@@ -421,17 +422,20 @@ export class ReviewWorker {
           reviewBaseSha,
           reviewId,
           reviewMode,
+          resolvedThreadCount: 0,
         }),
         github,
         job,
         statusCommentId,
       });
       controller.signal.throwIfAborted();
-      const completed = this.options.database.updateJob({
+      const { completed } = this.options.database.completeReviewJob({
         attempt: job.attempt ?? 0,
-        expectedStates: ['PUBLISHING'],
-        id: job.id,
-        state: 'DONE',
+        headSha: job.headSha,
+        jobId: job.id,
+        pullRequestNumber: job.pullRequestNumber,
+        repository: job.repository,
+        updates: review.result.finding_updates ?? [],
       });
       if (!completed) {
         throw new Error('review job could not enter DONE');
@@ -582,28 +586,37 @@ export class ReviewWorker {
     if (input.reviewMode === 'incremental' && input.result.findings.length === 0) {
       return undefined;
     }
-    if (input.job.publishedReviewId !== undefined) {
-      return input.job.publishedReviewId;
-    }
-
-    const publication = prepareReviewPublication(input.result, input.reviewableLines);
-    const reviewId = await input.github.publishReview({
+    const publication = prepareReviewPublication(input.result, input.reviewableLines, input.job.id);
+    const published = await input.github.publishReview({
       expectedHeadSha: input.job.headSha,
       installationId: input.job.installationId,
       inlineComments: publication.inlineComments,
       inlineFindingIndexes: publication.inlineFindingIndexes,
       jobId: input.job.id,
+      ...(input.job.publishedReviewId === undefined
+        ? {}
+        : { knownReviewId: input.job.publishedReviewId }),
       pullRequestNumber: input.job.pullRequestNumber,
       repository: input.job.repository,
       result: input.result,
       signal: input.signal,
     });
-    this.options.database.updateJob({
-      attempt: input.job.attempt ?? 0,
-      expectedStates: ['PUBLISHING'],
-      id: input.job.id,
-      publishedReviewId: reviewId,
-      state: 'PUBLISHING',
+    const reviewId = published.reviewId;
+    if (input.job.publishedReviewId === undefined) {
+      this.options.database.updateJob({
+        attempt: input.job.attempt ?? 0,
+        expectedStates: ['PUBLISHING'],
+        id: input.job.id,
+        publishedReviewId: reviewId,
+        state: 'PUBLISHING',
+      });
+    }
+    this.options.database.queueGitHubThreadAssociation({
+      expectedFingerprints: published.publishedInlineFingerprints,
+      jobId: input.job.id,
+      pullRequestNumber: input.job.pullRequestNumber,
+      repository: input.job.repository,
+      reviewDatabaseId: reviewId,
     });
     return reviewId;
   }
@@ -681,14 +694,29 @@ export class ReviewWorker {
     statusCommentId: number | undefined;
   }): Promise<void> {
     const attempt = input.job.attempt ?? 0;
+    let cancellation = input.cancellation;
     const updated = this.options.database.updateJob({
       attempt,
       expectedStates: ['CHECKING_OUT', 'SANDBOX_CREATING', 'REVIEWING', 'VALIDATING', 'PUBLISHING'],
       id: input.job.id,
-      state: input.cancellation.state,
+      state: cancellation.state,
     });
-    if (!updated && !this.options.database.isJobAttemptCurrent({ attempt, jobId: input.job.id })) {
-      return;
+    if (!updated) {
+      const persisted = this.options.database.getJobCancellation({
+        attempt,
+        jobId: input.job.id,
+      });
+      if (persisted === undefined) {
+        return;
+      }
+      cancellation = {
+        reason:
+          persisted.reason ??
+          (persisted.state === cancellation.state
+            ? cancellation.reason
+            : 'A newer pull request commit replaced this review run.'),
+        state: persisted.state,
+      };
     }
     if (updated) {
       this.#removeEvents(input.job);
@@ -698,19 +726,17 @@ export class ReviewWorker {
       conclusion: 'cancelled',
       installationId: input.job.installationId,
       output: {
-        summary: input.cancellation.reason,
+        summary: cancellation.reason,
         title:
-          input.cancellation.state === 'SUPERSEDED'
-            ? 'Code review superseded'
-            : 'Code review cancelled',
+          cancellation.state === 'SUPERSEDED' ? 'Code review superseded' : 'Code review cancelled',
       },
       repository: input.job.repository,
     });
     await this.#writeStatusComment({
       body:
-        input.cancellation.state === 'SUPERSEDED'
+        cancellation.state === 'SUPERSEDED'
           ? renderSupersededComment(input.job, input.checkRunId)
-          : renderCancelledComment(input.job, input.checkRunId, input.cancellation.reason),
+          : renderCancelledComment(input.job, input.checkRunId, cancellation.reason),
       github: input.github,
       job: input.job,
       statusCommentId: input.statusCommentId,

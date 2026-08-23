@@ -45,6 +45,8 @@ export const reviewResultSchema = z.object({
 
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
 
+const maximumFindingUpdateEvidenceBytes = 4_000;
+
 export type ReviewConclusion = 'neutral' | 'success';
 
 function normalizedPaths(paths: readonly string[]): Set<string> {
@@ -102,6 +104,54 @@ export function findingFingerprint(finding: ReviewResult['findings'][number]): s
     .update(`${normalizedPath}\0${normalizedTitle}`)
     .digest('hex')
     .slice(0, 16);
+}
+
+export function validateFindingUpdates(
+  result: ReviewResult,
+  previous: ReviewResult | undefined,
+): ReviewResult {
+  if (result.finding_updates === undefined || result.finding_updates.length === 0) {
+    return result;
+  }
+
+  const previousFingerprints = new Set(
+    previous?.findings.map((finding) => findingFingerprint(finding)) ?? [],
+  );
+  const seen = new Set<string>();
+  const valid: NonNullable<ReviewResult['finding_updates']> = [];
+  const rejected: string[] = [];
+
+  for (const update of result.finding_updates) {
+    const evidence = update.evidence.trim();
+    let reason: string | undefined;
+    if (!previousFingerprints.has(update.fingerprint)) {
+      reason = 'unknown fingerprint';
+    } else if (seen.has(update.fingerprint)) {
+      reason = 'duplicate fingerprint';
+    } else if (evidence.length === 0) {
+      reason = 'blank evidence';
+    } else if (Buffer.byteLength(evidence, 'utf8') > maximumFindingUpdateEvidenceBytes) {
+      reason = 'evidence exceeds 4000 bytes';
+    }
+    seen.add(update.fingerprint);
+    if (reason !== undefined) {
+      rejected.push(`${update.fingerprint}: ${reason}`);
+      continue;
+    }
+    valid.push({ ...update, evidence });
+  }
+
+  if (rejected.length === 0) {
+    return { ...result, finding_updates: valid };
+  }
+  return {
+    ...result,
+    finding_updates: valid,
+    limitations: [
+      ...result.limitations,
+      `Ignored invalid prior-finding updates (${rejected.join('; ')}).`,
+    ],
+  };
 }
 
 export function removePreviouslyReportedFindings(

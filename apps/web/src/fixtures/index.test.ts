@@ -100,6 +100,10 @@ describe('fixture harness', () => {
       fixtureDetailResponse(createFixture('finding-fixed'), 229)?.artifact.findings[0]?.state,
     ).toBe('fixed');
     expect(
+      fixtureDetailResponse(createFixture('finding-fixed'), 229)?.artifact.findings[0]
+        ?.thread_resolution?.state,
+    ).toBe('resolved');
+    expect(
       fixtureDetailResponse(createFixture('finding-still-present'), 229)?.artifact.findings[0]
         ?.state,
     ).toBe('still_present');

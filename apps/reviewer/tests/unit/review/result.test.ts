@@ -6,6 +6,7 @@ import {
   renderReview,
   reviewConclusion,
   reviewCoverage,
+  validateFindingUpdates,
 } from '../../../src/review/result.js';
 
 const previousFinding: ReviewResult['findings'][number] = {
@@ -153,6 +154,46 @@ describe('incremental review findings', () => {
       complete: false,
     });
     expect(reviewConclusion(result)).toBe('neutral');
+  });
+
+  it('keeps only unique, evidenced updates for supplied prior findings', () => {
+    const fingerprint = findingFingerprint(previousFinding);
+    const result = validateFindingUpdates(
+      {
+        ...previous,
+        finding_updates: [
+          { evidence: '  Fixed by the new guard.  ', fingerprint, status: 'fixed' },
+          { evidence: 'duplicate', fingerprint, status: 'still_present' },
+          { evidence: 'unknown', fingerprint: '0'.repeat(16), status: 'fixed' },
+        ],
+      },
+      previous,
+    );
+
+    expect(result.finding_updates).toEqual([
+      { evidence: 'Fixed by the new guard.', fingerprint, status: 'fixed' },
+    ]);
+    expect(result.limitations.at(-1)).toContain('Ignored invalid prior-finding updates');
+  });
+
+  it('rejects blank and oversized finding update evidence', () => {
+    const fingerprint = findingFingerprint(previousFinding);
+    const otherFinding = { ...previousFinding, title: 'A different prior defect' };
+    const otherFingerprint = findingFingerprint(otherFinding);
+    const result = validateFindingUpdates(
+      {
+        ...previous,
+        finding_updates: [
+          { evidence: '   ', fingerprint, status: 'fixed' },
+          { evidence: '가'.repeat(2_000), fingerprint: otherFingerprint, status: 'fixed' },
+        ],
+      },
+      { ...previous, findings: [previousFinding, otherFinding] },
+    );
+
+    expect(result.finding_updates).toEqual([]);
+    expect(result.limitations.at(-1)).toContain('blank evidence');
+    expect(result.limitations.at(-1)).toContain('evidence exceeds 4000 bytes');
   });
 });
 
