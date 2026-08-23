@@ -8,11 +8,13 @@ import {
   evaluationWriteResponseSchema,
   evaluationsResponseSchema,
   reviewDetailSchema,
+  reviewExecutionSnapshotSchema,
   reviewListResponseSchema,
   statusResponseSchema,
 } from '@repo/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createLeverframeServer } from '../../../src/app/server.js';
+import { ExecutionTraceStore } from '../../../src/execution/trace.js';
 import { CredentialStore } from '../../../src/github/credentials.js';
 import { JobDatabase } from '../../../src/jobs/database.js';
 import { findingFingerprint } from '../../../src/review/result.js';
@@ -97,7 +99,14 @@ async function fixture() {
     ...(job.attempt === undefined ? {} : { attempt: job.attempt }),
   });
   database.recordReviewArtifact(job.id, result);
-  const server = createLeverframeServer(config, database, credentials);
+  const traceStore = new ExecutionTraceStore(join(directory, 'jobs'));
+  const server = createLeverframeServer(
+    { ...config, jobsDirectory: join(directory, 'jobs') },
+    database,
+    credentials,
+    {},
+    traceStore,
+  );
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve());
   });
@@ -107,7 +116,7 @@ async function fixture() {
     () => database.close(),
     () => rmSync(directory, { recursive: true, force: true }),
   );
-  return { database, job, url: `http://127.0.0.1:${address.port}` };
+  return { database, job, traceStore, url: `http://127.0.0.1:${address.port}` };
 }
 
 describe('versioned reviewer API contracts', () => {
@@ -119,6 +128,33 @@ describe('versioned reviewer API contracts', () => {
     expect(parsed.overall).toBe('unknown');
     expect(parsed.worker.status).toBe('unknown');
     expect(parsed.sandbox.status).toBe('unknown');
+  });
+
+  it('returns a bounded execution snapshot and resumable terminal SSE stream', async () => {
+    const { job, traceStore, url } = await fixture();
+    traceStore.append(job.id, job.attempt ?? 1, { type: 'attempt_started' });
+    traceStore.append(job.id, job.attempt ?? 1, {
+      type: 'command_completed',
+      itemId: 'cmd_1',
+      command: 'pnpm test',
+      exitCode: 0,
+      output: 'passed',
+      status: 'completed',
+    });
+    const response = await fetch(`${url}/api/v1/reviews/${job.id}/execution`);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    const snapshot = reviewExecutionSnapshotSchema.parse(await response.json());
+    expect(snapshot.status).toBe('completed');
+    expect(snapshot.events).toHaveLength(2);
+    expect(snapshot.events[1]).toMatchObject({ command: 'pnpm test', exit_code: 0 });
+
+    const stream = await fetch(`${url}/api/v1/reviews/${job.id}/execution/events?after=1`);
+    expect(stream.headers.get('content-type')).toContain('text/event-stream');
+    const body = await stream.text();
+    expect(body).toContain('id: 2');
+    expect(body).toContain('event: trace');
+    expect(body).toContain('event: snapshot');
+    expect(body).not.toContain('id: 1');
   });
 
   it('lists stable page-20 results and validates detail/evaluation/context contracts', async () => {

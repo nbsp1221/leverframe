@@ -2,10 +2,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ExecutionTraceStore } from '../../../src/execution/trace.js';
 import { SandboxReviewer } from '../../../src/sandbox/reviewer.js';
-import { runProcess } from '../../../src/system/process.js';
+import { runProcess, runStreamingProcess } from '../../../src/system/process.js';
 
-vi.mock('../../../src/system/process.js', () => ({ runProcess: vi.fn() }));
+vi.mock('../../../src/system/process.js', () => ({
+  runProcess: vi.fn(),
+  runStreamingProcess: vi.fn(),
+}));
 
 const temporaryDirectories: string[] = [];
 
@@ -43,6 +47,7 @@ describe('SandboxReviewer', () => {
       model: 'gpt-5.6-luna',
       reasoningEffort: 'medium',
       resourcesDirectory,
+      traceStore: new ExecutionTraceStore(join(root, 'shared', 'jobs')),
     });
     const prepared: Array<{ prompt: string; schema: string; model: string; reasoning: string }> =
       [];
@@ -52,6 +57,7 @@ describe('SandboxReviewer', () => {
       cloneUrl: 'https://github.com/owner/repository.git',
       headSha: 'b'.repeat(40),
       installationToken: 'installation-token',
+      attempt: 1,
       jobDirectory,
       jobId: 42,
       pullRequestNumber: 7,
@@ -90,15 +96,20 @@ describe('SandboxReviewer', () => {
     expect(fetchCall).toBeDefined();
     expect(fetchCall?.[1]).not.toContain('installation-token');
     expect(fetchCall?.[2]).toMatchObject({ input: 'installation-token\n' });
-    expect(runProcess).toHaveBeenCalledWith(
-      'sbx',
+    const codexCall = vi.mocked(runStreamingProcess).mock.calls[0];
+    expect(codexCall?.[0]).toBe('sbx');
+    expect(codexCall?.[1]).toEqual(
       expect.arrayContaining([
+        'codex',
+        'exec',
         '--config',
         'model_reasoning_effort="medium"',
         '--output-schema',
         join(stagedResourcesDirectory, 'review-schema.json'),
+        '--json',
       ]),
-      expect.any(Object),
     );
+    expect(typeof codexCall?.[2]?.input).toBe('string');
+    expect(typeof codexCall?.[2]?.onStdout).toBe('function');
   });
 });

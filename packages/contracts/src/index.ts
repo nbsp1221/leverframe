@@ -60,6 +60,79 @@ export const reviewIdParamsSchema = z.object({
   reviewId: z.coerce.number().int().positive(),
 });
 
+export const reviewExecutionQuerySchema = z.object({
+  after: z.coerce.number().int().nonnegative().default(0),
+});
+
+export const reviewExecutionStageSchema = z.enum([
+  'queued',
+  'checking_out',
+  'sandbox_creating',
+  'reviewing',
+  'validating',
+  'publishing',
+  'done',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'superseded',
+  'unknown',
+]);
+
+export const reviewExecutionEventTypeSchema = z.enum([
+  'attempt_started',
+  'process_heartbeat',
+  'thread_started',
+  'turn_started',
+  'command_started',
+  'command_completed',
+  'agent_message',
+  'file_change',
+  'tool_activity',
+  'turn_completed',
+  'turn_failed',
+  'trace_notice',
+]);
+
+export const reviewExecutionEventSchema = z.object({
+  schema_version: z.literal(1),
+  sequence: z.number().int().positive(),
+  attempt: z.number().int().positive(),
+  observed_at: z.string().datetime({ offset: true }),
+  type: reviewExecutionEventTypeSchema,
+  item_id: z.string().nullable(),
+  command: z.string().nullable(),
+  status: z.string().nullable(),
+  exit_code: z.number().int().nullable(),
+  duration_ms: z.number().int().nonnegative().nullable(),
+  output: z.string().nullable(),
+  output_truncated: z.boolean(),
+  message: z.string().nullable(),
+  notice_code: z.string().nullable(),
+});
+
+export const reviewExecutionCurrentCommandSchema = z.object({
+  item_id: z.string(),
+  command: z.string(),
+  started_at: z.string().datetime({ offset: true }),
+});
+
+export const reviewExecutionSnapshotSchema = z.object({
+  review_id: z.number().int().positive(),
+  available: z.boolean(),
+  unavailable_reason: z.string().nullable(),
+  attempt: z.number().int().nonnegative(),
+  status: reviewStatusSchema,
+  stage: reviewExecutionStageSchema,
+  started_at: z.string().datetime({ offset: true }).nullable(),
+  process_heartbeat_at: z.string().datetime({ offset: true }).nullable(),
+  last_activity_at: z.string().datetime({ offset: true }).nullable(),
+  last_sequence: z.number().int().nonnegative(),
+  trace_truncated: z.boolean(),
+  current_command: reviewExecutionCurrentCommandSchema.nullable(),
+  events: z.array(reviewExecutionEventSchema),
+});
+
 export const findingParamsSchema = reviewIdParamsSchema.extend({
   fingerprint: z.string().regex(/^[0-9a-f]{16}$/),
 });
@@ -257,6 +330,8 @@ export type DependencyStatus = z.infer<typeof dependencyStatusSchema>;
 export type ReviewListItem = z.infer<typeof reviewListItemSchema>;
 export type ReviewListResponse = z.infer<typeof reviewListResponseSchema>;
 export type ReviewDetail = z.infer<typeof reviewDetailSchema>;
+export type ReviewExecutionEvent = z.infer<typeof reviewExecutionEventSchema>;
+export type ReviewExecutionSnapshot = z.infer<typeof reviewExecutionSnapshotSchema>;
 export type ReviewEvaluation = z.infer<typeof reviewEvaluationSchema>;
 export type EvaluationHistory = z.infer<typeof evaluationHistorySchema>;
 export type EvaluationsResponse = z.infer<typeof evaluationsResponseSchema>;

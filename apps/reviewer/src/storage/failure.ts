@@ -4,6 +4,22 @@ export function redactFailureExcerpt(
   value: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
+  const redacted = redactSensitiveText(value, environment);
+  const bytes = Buffer.from(redacted, 'utf8');
+  if (bytes.byteLength <= MAX_FAILURE_BYTES) {
+    return redacted;
+  }
+  let excerpt = bytes.subarray(bytes.byteLength - MAX_FAILURE_BYTES).toString('utf8');
+  while (Buffer.byteLength(excerpt, 'utf8') > MAX_FAILURE_BYTES) {
+    excerpt = excerpt.slice(1);
+  }
+  return excerpt;
+}
+
+export function redactSensitiveText(
+  value: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
   let redacted = value
     .replace(/((?:authorization|cookie|set-cookie)\s*:\s*)([^\r\n]+)/gi, '$1[REDACTED]')
     .replace(
@@ -20,15 +36,7 @@ export function redactFailureExcerpt(
       redacted = redacted.replaceAll(secret, '[REDACTED]');
     }
   }
-  const bytes = Buffer.from(redacted, 'utf8');
-  if (bytes.byteLength <= MAX_FAILURE_BYTES) {
-    return redacted;
-  }
-  let excerpt = bytes.subarray(bytes.byteLength - MAX_FAILURE_BYTES).toString('utf8');
-  while (Buffer.byteLength(excerpt, 'utf8') > MAX_FAILURE_BYTES) {
-    excerpt = excerpt.slice(1);
-  }
-  return excerpt;
+  return redacted;
 }
 
 export const FAILURE_EXCERPT_MAX_BYTES = MAX_FAILURE_BYTES;

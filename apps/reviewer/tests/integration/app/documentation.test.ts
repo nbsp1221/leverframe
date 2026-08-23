@@ -106,9 +106,11 @@ describe('agent-readable API documentation', () => {
         'setFindingEvaluation',
         'withdrawFindingEvaluation',
         'getFindingContext',
+        'getReviewExecution',
+        'streamReviewExecution',
       ]),
     );
-    expect(operationIds).toHaveLength(9);
+    expect(operationIds).toHaveLength(11);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
@@ -149,6 +151,13 @@ describe('agent-readable API documentation', () => {
         'get',
         '/api/v1/reviews/{reviewId}/findings/{fingerprint}/context',
         'getFindingContext',
+        ['200', '404', '422'],
+      ],
+      ['get', '/api/v1/reviews/{reviewId}/execution', 'getReviewExecution', ['200', '404', '422']],
+      [
+        'get',
+        '/api/v1/reviews/{reviewId}/execution/events',
+        'streamReviewExecution',
         ['200', '404', '422'],
       ],
     ] as const;

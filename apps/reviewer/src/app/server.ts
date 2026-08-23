@@ -11,8 +11,10 @@ import { createMarkdownFromOpenApi } from '@scalar/openapi-to-markdown';
 import { HTTPException } from 'hono/http-exception';
 import type { CredentialStore } from '../github/credentials.js';
 import type { JobDatabase } from '../jobs/database.js';
+import { ExecutionTraceStore } from '../execution/trace.js';
 import type { ServerConfig } from './config.js';
 import { registerGitHubRoutes } from './routes/github.js';
+import { registerReviewExecutionRoutes } from './routes/review-execution.js';
 import { registerReviewRoutes } from './routes/reviews.js';
 import {
   type Dependency,
@@ -47,6 +49,7 @@ function createApi(
   database: JobDatabase,
   credentials: CredentialStore,
   hooks: ServerHooks,
+  traceStore: ExecutionTraceStore,
 ): OpenAPIHono {
   const app = new OpenAPIHono({
     defaultHook: (result, c) => {
@@ -97,6 +100,7 @@ function createApi(
 
   registerGitHubRoutes(app, config, database, credentials, hooks, observed);
   registerReviewRoutes(app, database, hooks, observations, recordRead);
+  registerReviewExecutionRoutes(app, database, traceStore, recordRead);
 
   const openApiDocument = app.getOpenAPI31Document({
     openapi: '3.1.0',
@@ -165,8 +169,11 @@ export function createLeverframeServer(
   database: JobDatabase,
   credentials: CredentialStore,
   hooks: ServerHooks = {},
+  traceStore: ExecutionTraceStore = new ExecutionTraceStore(config.jobsDirectory),
 ) {
-  const listener = getRequestListener(createApi(config, database, credentials, hooks).fetch);
+  const listener = getRequestListener(
+    createApi(config, database, credentials, hooks, traceStore).fetch,
+  );
   return createServer((request, response) => {
     void listener(request, response);
   });
