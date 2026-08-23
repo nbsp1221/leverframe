@@ -702,23 +702,21 @@ export class ReviewWorker {
       state: cancellation.state,
     });
     if (!updated) {
-      if (!this.options.database.isJobAttemptCurrent({ attempt, jobId: input.job.id })) {
+      const persisted = this.options.database.getJobCancellation({
+        attempt,
+        jobId: input.job.id,
+      });
+      if (persisted === undefined) {
         return;
       }
-      const persistedState = this.options.database.getReviewJob(input.job.id)?.state;
-      if (persistedState === 'CANCELLED' && cancellation.state !== persistedState) {
-        cancellation = {
-          reason: 'The pull request was closed or converted to draft.',
-          state: persistedState,
-        };
-      } else if (persistedState === 'SUPERSEDED' && cancellation.state !== persistedState) {
-        cancellation = {
-          reason: 'A newer pull request commit replaced this review run.',
-          state: persistedState,
-        };
-      } else if (persistedState !== cancellation.state) {
-        return;
-      }
+      cancellation = {
+        reason:
+          persisted.reason ??
+          (persisted.state === cancellation.state
+            ? cancellation.reason
+            : 'A newer pull request commit replaced this review run.'),
+        state: persisted.state,
+      };
     }
     if (updated) {
       this.#removeEvents(input.job);

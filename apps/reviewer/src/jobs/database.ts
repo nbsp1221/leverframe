@@ -64,6 +64,11 @@ export interface CancellationResult {
   jobsCancelled: number;
 }
 
+export interface PersistedCancellation {
+  reason?: string;
+  state: 'CANCELLED' | 'SUPERSEDED';
+}
+
 export interface ReviewJob extends PullRequestJobInput {
   /**
    * Monotonically increasing claim/requeue token used to reject stale worker
@@ -289,7 +294,9 @@ export class JobDatabase {
   cancelPullRequest(input: PullRequestCancellationInput): CancellationResult {
     const now = new Date().toISOString();
     const reason =
-      input.action === 'closed' ? 'Pull request closed.' : 'Pull request converted to draft.';
+      input.action === 'closed'
+        ? 'The pull request was closed.'
+        : 'The pull request was converted to draft.';
 
     this.#database.exec('BEGIN IMMEDIATE');
     try {
@@ -413,6 +420,22 @@ export class JobDatabase {
       ...(row.superseded_by_job_id === null || row.superseded_by_job_id === undefined
         ? {}
         : { supersededByJobId: Number(row.superseded_by_job_id) }),
+    };
+  }
+
+  getJobCancellation(input: { attempt: number; jobId: number }): PersistedCancellation | undefined {
+    const row = this.#database
+      .prepare(`
+        SELECT state, error FROM review_jobs
+        WHERE id = ? AND attempt = ? AND state IN ('CANCELLED', 'SUPERSEDED')
+      `)
+      .get(input.jobId, input.attempt) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      ...(typeof row.error === 'string' ? { reason: row.error } : {}),
+      state: String(row.state) as PersistedCancellation['state'],
     };
   }
 

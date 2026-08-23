@@ -34,7 +34,18 @@ afterEach(() => {
 });
 
 describe('ReviewWorker publication cancellation', () => {
-  it('uses lifecycle cancellation after supersession as the terminal Check Run state', async () => {
+  it.each([
+    {
+      cancellation: 'lifecycle' as const,
+      expectedSummary: 'The pull request was converted to draft.',
+      name: 'lifecycle cancellation',
+    },
+    {
+      cancellation: 'manual' as const,
+      expectedSummary: 'Review cancelled by @alice.',
+      name: 'manual cancellation',
+    },
+  ])('uses $name after supersession as the terminal Check Run outcome', async (testCase) => {
     const directory = mkdtempSync(join(tmpdir(), 'leverframe-worker-publication-'));
     temporaryDirectories.push(directory);
     const headSha = 'a'.repeat(40);
@@ -61,6 +72,7 @@ describe('ReviewWorker publication cancellation', () => {
     let reviewListSeen = false;
     let reviewPostRequests = 0;
     const cancelledCheckRunTitles: string[] = [];
+    const cancelledCheckRunSummaries: string[] = [];
     let cancelledJobs = 0;
     githubMocks.getInstallationOctokit.mockResolvedValue({
       request: githubMocks.installationRequest,
@@ -96,6 +108,9 @@ describe('ReviewWorker publication cancellation', () => {
             typeof output.title === 'string'
           ) {
             cancelledCheckRunTitles.push(output.title);
+            if ('summary' in output && typeof output.summary === 'string') {
+              cancelledCheckRunSummaries.push(output.summary);
+            }
           }
         }
         return { data: {} };
@@ -129,16 +144,35 @@ describe('ReviewWorker publication cancellation', () => {
         };
         database.enqueuePullRequest(newerJob);
         worker?.cancelSuperseded(newerJob);
-        const cancellation = {
-          action: 'converted_to_draft' as const,
-          deliveryId: 'cancel-delivery',
-          headSha,
-          installationId: 42,
-          pullRequestNumber: 7,
-          repository: 'example/project',
-        };
-        cancelledJobs = database.cancelPullRequest(cancellation).jobsCancelled;
-        worker?.cancelPullRequest(cancellation);
+        if (testCase.cancellation === 'lifecycle') {
+          const cancellation = {
+            action: 'converted_to_draft' as const,
+            deliveryId: 'cancel-delivery',
+            headSha,
+            installationId: 42,
+            pullRequestNumber: 7,
+            repository: 'example/project',
+          };
+          cancelledJobs = database.cancelPullRequest(cancellation).jobsCancelled;
+          worker?.cancelPullRequest(cancellation);
+        } else {
+          const cancellation = {
+            actor: 'alice',
+            command: 'cancel' as const,
+            commentId: 303,
+            deliveryId: 'cancel-delivery',
+            installationId: 42,
+            pullRequestNumber: 7,
+            repository: 'example/project',
+          };
+          const reason = `Review cancelled by @${cancellation.actor}.`;
+          cancelledJobs = database.cancelActiveJobs(
+            cancellation.repository,
+            cancellation.pullRequestNumber,
+            reason,
+          );
+          worker?.cancelManual(cancellation);
+        }
         return { data: [] };
       }
       if (route === 'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
@@ -203,6 +237,7 @@ describe('ReviewWorker publication cancellation', () => {
     expect(reviewPostRequests).toBe(0);
     expect(cancelledJobs).toBe(2);
     expect(cancelledCheckRunTitles).toEqual(['Code review cancelled']);
+    expect(cancelledCheckRunSummaries).toEqual([testCase.expectedSummary]);
     expect(database.getLatestJobStatus('example/project', 7)?.state).toBe('CANCELLED');
     database.close();
   });
