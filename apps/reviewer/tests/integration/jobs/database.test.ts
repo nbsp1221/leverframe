@@ -146,7 +146,7 @@ describe('JobDatabase', () => {
     database.close();
   });
 
-  it('rejects stale cancellation finalization after creating a replacement execution', () => {
+  it('keeps cancellation finalization current while rejecting stale state transitions', () => {
     const database = new JobDatabase(':memory:');
     database.enqueuePullRequest(baseJob);
     const claimed = database.claimNextJob();
@@ -175,10 +175,14 @@ describe('JobDatabase', () => {
     expect(
       database.updateJob({
         attempt: claimed.attempt ?? 0,
+        expectedStates: ['CHECKING_OUT', 'SANDBOX_CREATING', 'REVIEWING'],
         id: claimed.id,
         state: 'CANCELLED',
       }),
     ).toBe(false);
+    expect(database.isJobAttemptCurrent({ attempt: claimed.attempt ?? 0, jobId: claimed.id })).toBe(
+      true,
+    );
     const replacement = database.claimNextJob();
     expect(replacement).toBeDefined();
     expect(replacement?.id).toBeGreaterThan(claimed.id);

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { runProcess } from '../system/process.js';
-import { type ReviewResult, reviewResultSchema } from './result.js';
+import { type ReviewResult, findingFingerprint, reviewResultSchema } from './result.js';
 
 export function loadPreviousResults(paths: string[] | undefined): ReviewResult | undefined {
   if (paths === undefined || paths.length === 0) {
@@ -16,7 +16,7 @@ export function loadPreviousResults(paths: string[] | undefined): ReviewResult |
         newestArtifactLoaded = true;
       }
       for (const finding of result.findings) {
-        const key = `${finding.file}:${finding.line}`;
+        const key = findingFingerprint(finding);
         if (!findings.has(key)) {
           findings.set(key, finding);
         }
@@ -46,7 +46,7 @@ export function mergePreviousResults(
   const findings = new Map<string, ReviewResult['findings'][number]>();
   for (const result of results) {
     for (const finding of result.findings) {
-      const key = `${finding.file}:${finding.line}`;
+      const key = findingFingerprint(finding);
       if (!findings.has(key)) {
         findings.set(key, finding);
       }

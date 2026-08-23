@@ -60,6 +60,7 @@ describe('ReviewWorker publication cancellation', () => {
     let pullRequestReads = 0;
     let reviewListSeen = false;
     let reviewPostRequests = 0;
+    let cancelledCheckRuns = 0;
     githubMocks.getInstallationOctokit.mockResolvedValue({
       request: githubMocks.installationRequest,
     });
@@ -72,7 +73,7 @@ describe('ReviewWorker publication cancellation', () => {
       }
       throw new Error(`unexpected app route: ${route}`);
     });
-    githubMocks.installationRequest.mockImplementation((route: string) => {
+    githubMocks.installationRequest.mockImplementation((route: string, parameters?: unknown) => {
       if (route === 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs') {
         return { data: { check_runs: [] } };
       }
@@ -80,6 +81,14 @@ describe('ReviewWorker publication cancellation', () => {
         return { data: { id: 101 } };
       }
       if (route === 'PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}') {
+        if (
+          typeof parameters === 'object' &&
+          parameters !== null &&
+          'conclusion' in parameters &&
+          parameters.conclusion === 'cancelled'
+        ) {
+          cancelledCheckRuns += 1;
+        }
         return { data: {} };
       }
       if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') {
@@ -100,15 +109,16 @@ describe('ReviewWorker publication cancellation', () => {
       }
       if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
         reviewListSeen = true;
-        worker?.cancelManual({
-          actor: 'octocat',
-          command: 'review',
-          commentId: 99,
-          deliveryId: 'delivery-1',
+        const cancellation = {
+          action: 'converted_to_draft' as const,
+          deliveryId: 'cancel-delivery',
+          headSha,
           installationId: 42,
           pullRequestNumber: 7,
           repository: 'example/project',
-        });
+        };
+        database.cancelPullRequest(cancellation);
+        worker?.cancelPullRequest(cancellation);
         return { data: [] };
       }
       if (route === 'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
@@ -171,7 +181,8 @@ describe('ReviewWorker publication cancellation', () => {
     expect(pullRequestReads).toBeGreaterThanOrEqual(3);
     expect(reviewListSeen).toBe(true);
     expect(reviewPostRequests).toBe(0);
-    expect(database.getLatestJobStatus('example/project', 7)?.state).not.toBe('DONE');
+    expect(cancelledCheckRuns).toBe(1);
+    expect(database.getLatestJobStatus('example/project', 7)?.state).toBe('CANCELLED');
     database.close();
   });
 

@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReviewResult } from '../../../src/review/result.js';
-import { loadPreviousResults, selectReviewContext } from '../../../src/review/history.js';
+import {
+  loadPreviousResults,
+  mergePreviousResults,
+  selectReviewContext,
+} from '../../../src/review/history.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -13,7 +17,7 @@ afterEach(() => {
   }
 });
 
-function resultAt(file: string, line: number): ReviewResult {
+function resultAt(file: string, line: number, title = 'Incorrect behavior'): ReviewResult {
   return {
     findings: [
       {
@@ -24,7 +28,7 @@ function resultAt(file: string, line: number): ReviewResult {
         line,
         severity: 'high',
         suggested_action: 'correct the behavior',
-        title: 'Incorrect behavior',
+        title,
       },
     ],
     limitations: [],
@@ -34,7 +38,7 @@ function resultAt(file: string, line: number): ReviewResult {
 }
 
 describe('previous review history', () => {
-  it('merges recent findings and keeps the newest result at each location', () => {
+  it('merges recent findings and keeps the newest result for each fingerprint', () => {
     const directory = mkdtempSync(join(tmpdir(), 'review-history-test-'));
     temporaryDirectories.push(directory);
     const newestPath = join(directory, 'newest.json');
@@ -45,6 +49,25 @@ describe('previous review history', () => {
     const result = loadPreviousResults([newestPath, olderPath]);
 
     expect(result?.findings).toEqual(resultAt('src/access.ts', 4).findings);
+  });
+
+  it('keeps distinct findings that share a file and line', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'review-history-test-'));
+    temporaryDirectories.push(directory);
+    const newestPath = join(directory, 'newest.json');
+    const olderPath = join(directory, 'older.json');
+    const newest = resultAt('src/access.ts', 4, 'New defect');
+    const older = resultAt('src/access.ts', 4, 'Earlier defect');
+    writeFileSync(newestPath, JSON.stringify(newest));
+    writeFileSync(olderPath, JSON.stringify(older));
+
+    const result = loadPreviousResults([newestPath, olderPath]);
+
+    expect(result?.findings).toEqual([...newest.findings, ...older.findings]);
+    expect(mergePreviousResults([newest, older])?.findings).toEqual([
+      ...newest.findings,
+      ...older.findings,
+    ]);
   });
 
   it('returns no context when there is no usable review history', () => {

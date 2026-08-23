@@ -307,7 +307,7 @@ export class JobDatabase {
       const cancelled = this.#database
         .prepare(`
           UPDATE review_jobs
-          SET state = 'CANCELLED', attempt = attempt + 1, error = ?, updated_at = ?
+          SET state = 'CANCELLED', error = ?, updated_at = ?
           WHERE repository = ?
             AND pull_request_number = ?
             AND state IN (
