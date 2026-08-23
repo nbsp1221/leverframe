@@ -298,6 +298,23 @@ describe('JobDatabase', () => {
       throw new Error('expected a publication job');
     }
     const fingerprint = '1234567890abcdef';
+    database.queueGitHubThreadAssociation({
+      expectedFingerprints: [fingerprint],
+      jobId: publicationJob.id,
+      pullRequestNumber: publicationJob.pullRequestNumber,
+      repository: publicationJob.repository,
+      reviewDatabaseId: 101,
+    });
+    expect(database.nextPendingGitHubThreadAssociation()).toMatchObject({
+      attempt: 0,
+      expectedFingerprints: new Set([fingerprint]),
+      installationId: publicationJob.installationId,
+      jobId: publicationJob.id,
+      reviewDatabaseId: 101,
+    });
+    expect(
+      database.getFindingThreadStatuses(baseJob.repository, baseJob.pullRequestNumber),
+    ).toEqual([{ fingerprint, resolutionState: 'RESOLUTION_PENDING' }]);
     database.recordGitHubThreadAssociation({
       commentNodeId: 'PRRC_comment',
       fingerprint,
@@ -307,6 +324,9 @@ describe('JobDatabase', () => {
       reviewDatabaseId: '101',
       threadNodeId: 'PRRT_thread',
     });
+    expect(database.remainingGitHubThreadAssociationFingerprints(publicationJob.id)).toEqual([]);
+    database.completeGitHubThreadAssociation(publicationJob.id);
+    expect(database.nextPendingGitHubThreadAssociation()).toBeUndefined();
 
     database.updateJob({ id: publicationJob.id, state: 'DONE' });
     database.enqueuePullRequest({
@@ -332,6 +352,8 @@ describe('JobDatabase', () => {
       }),
     ).toBe(1);
 
+    expect(database.nextPendingThreadResolution()).toBeUndefined();
+    database.updateJob({ id: resolutionJob.id, state: 'DONE' });
     const pending = database.nextPendingThreadResolution();
     expect(pending).toMatchObject({
       attempt: 0,
@@ -346,6 +368,15 @@ describe('JobDatabase', () => {
       throw new Error('expected a pending thread resolution');
     }
 
+    database.failThreadResolution({
+      error: 'temporary terminal failure',
+      id: pending.id,
+      retryDelayMilliseconds: 0,
+    });
+    expect(database.nextPendingThreadResolution()).toMatchObject({
+      attempt: 1,
+      id: pending.id,
+    });
     database.markThreadResolved({
       id: pending.id,
       resolutionCommentNodeId: 'PRRC_resolution',

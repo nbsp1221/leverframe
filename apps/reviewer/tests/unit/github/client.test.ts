@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GitHubAppClient,
   canManageRepositoryRole,
-  githubRetryDelayMilliseconds,
   limitGitHubBody,
   repositoryReadTokenRequest,
 } from '../../../src/github/client.js';
+import { githubRetryDelayMilliseconds } from '../../../src/github/retry.js';
+import { GitHubReviewThreadClient } from '../../../src/github/review-thread-client.js';
 
 const githubMocks = vi.hoisted(() => ({
   appRequest: vi.fn(),
@@ -240,18 +241,25 @@ describe('review thread lifecycle', () => {
     expect(githubMocks.graphql).toHaveBeenCalledTimes(4);
   });
 
-  it('treats viewerCanResolve false as a permanent failure before mutation', async () => {
+  it('attempts the mutation when an installation token reports viewerCanResolve false', async () => {
     githubMocks.installationRequest.mockResolvedValue({
       data: pullRequestResponse('b'.repeat(40)),
     });
-    githubMocks.graphql.mockResolvedValue({
-      node: {
-        comments: { nodes: [] },
-        id: 'thread-1',
-        isResolved: false,
-        viewerCanResolve: false,
-      },
-    });
+    githubMocks.graphql
+      .mockResolvedValueOnce({
+        node: {
+          comments: { nodes: [] },
+          id: 'thread-1',
+          isResolved: false,
+          viewerCanResolve: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        addPullRequestReviewThreadReply: { comment: { id: 'resolution-comment' } },
+      })
+      .mockResolvedValueOnce({
+        resolveReviewThread: { thread: { id: 'thread-1', isResolved: true } },
+      });
     const client = createClient();
 
     await expect(
@@ -265,13 +273,81 @@ describe('review thread lifecycle', () => {
         repository: 'example/project',
         threadNodeId: 'thread-1',
       }),
-    ).rejects.toMatchObject({ retryable: false });
-    expect(githubMocks.graphql).toHaveBeenCalledTimes(1);
+    ).resolves.toEqual({
+      alreadyResolved: false,
+      resolutionCommentNodeId: 'resolution-comment',
+    });
+    expect(githubMocks.graphql).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects a successful reply mutation with no persisted comment', async () => {
+    githubMocks.installationRequest.mockResolvedValue({
+      data: pullRequestResponse('b'.repeat(40)),
+    });
+    githubMocks.graphql
+      .mockResolvedValueOnce({
+        node: {
+          comments: { nodes: [] },
+          id: 'thread-1',
+          isResolved: false,
+          viewerCanResolve: true,
+        },
+      })
+      .mockResolvedValueOnce({ addPullRequestReviewThreadReply: null })
+      .mockResolvedValueOnce({
+        node: {
+          comments: { nodes: [] },
+          id: 'thread-1',
+          isResolved: false,
+          viewerCanResolve: true,
+        },
+      });
+
+    await expect(resolveThread(createClient())).rejects.toMatchObject({ retryable: true });
+    expect(githubMocks.graphql).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects a successful resolve mutation that does not resolve the thread', async () => {
+    githubMocks.installationRequest.mockResolvedValue({
+      data: pullRequestResponse('b'.repeat(40)),
+    });
+    const unresolvedThread = {
+      node: {
+        comments: { nodes: [] },
+        id: 'thread-1',
+        isResolved: false,
+        viewerCanResolve: true,
+      },
+    };
+    githubMocks.graphql
+      .mockResolvedValueOnce(unresolvedThread)
+      .mockResolvedValueOnce({
+        addPullRequestReviewThreadReply: { comment: { id: 'resolution-comment' } },
+      })
+      .mockResolvedValueOnce({ resolveReviewThread: null })
+      .mockResolvedValueOnce(unresolvedThread)
+      .mockResolvedValueOnce(unresolvedThread);
+
+    await expect(resolveThread(createClient())).rejects.toMatchObject({ retryable: true });
+    expect(githubMocks.graphql).toHaveBeenCalledTimes(5);
   });
 });
 
-function createClient(): GitHubAppClient {
-  return new GitHubAppClient({
+function resolveThread(client: GitHubReviewThreadClient) {
+  return client.resolveFindingThread({
+    evidence: 'The condition is now correct.',
+    expectedHeadSha: 'b'.repeat(40),
+    fingerprint: '1234567890abcdef',
+    installationId: 42,
+    jobId: 8,
+    pullRequestNumber: 3,
+    repository: 'example/project',
+    threadNodeId: 'thread-1',
+  });
+}
+
+function createClient(): GitHubReviewThreadClient {
+  return new GitHubReviewThreadClient({
     appId: 1,
     clientId: 'client',
     name: 'leverframe',

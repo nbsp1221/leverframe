@@ -76,7 +76,6 @@ const server = createLeverframeServer(
     uiBaseUrl: 'http://127.0.0.1:16722',
     webhookUrl: 'http://127.0.0.1:16722/webhooks/github',
     reasoningEffort: 'low',
-    resolveFixedThreads: false,
     resourcesDirectory: fileURLToPath(new URL('../../resources', import.meta.url)),
   },
   database,

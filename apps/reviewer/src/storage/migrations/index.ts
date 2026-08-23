@@ -310,6 +310,29 @@ export const migrations: readonly Migration[] = [
         ON github_finding_threads(resolution_state, next_resolution_at, id);
     `),
   },
+  {
+    version: 5,
+    name: 'github-thread-association-queue',
+    apply: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS github_thread_association_intents (
+        job_id INTEGER PRIMARY KEY REFERENCES review_jobs(id),
+        repository TEXT NOT NULL,
+        pull_request_number INTEGER NOT NULL,
+        review_database_id TEXT NOT NULL,
+        expected_fingerprints_json TEXT NOT NULL CHECK(json_valid(expected_fingerprints_json)),
+        state TEXT NOT NULL DEFAULT 'PENDING' CHECK(state IN ('PENDING','COMPLETED','FAILED')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS github_thread_association_pending_idx
+        ON github_thread_association_intents(state, next_attempt_at, job_id);
+    `),
+  },
 ];
 
 export function runMigrations(database: DatabaseSync): number {
@@ -385,6 +408,14 @@ export function runMigrations(database: DatabaseSync): number {
     !threadColumns.has('resolution_attempts')
   ) {
     throw new Error('incompatible github_finding_threads schema');
+  }
+  const associationColumns = columns(database, 'github_thread_association_intents');
+  if (
+    !associationColumns.has('expected_fingerprints_json') ||
+    !associationColumns.has('state') ||
+    !associationColumns.has('attempts')
+  ) {
+    throw new Error('incompatible github_thread_association_intents schema');
   }
   return latest;
 }

@@ -22,7 +22,6 @@ const config: ServerConfig = {
   uiBaseUrl: 'https://leverframe.retn0.dev',
   webhookUrl: 'https://leverframe-api.retn0.dev/webhooks/github',
   reasoningEffort: 'low',
-  resolveFixedThreads: false,
   resourcesDirectory: '/unused/resources',
 };
 

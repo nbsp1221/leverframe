@@ -14,6 +14,7 @@ import { redactFailureExcerpt } from '../storage/failure.js';
 import {
   type FindingThreadStatus,
   GitHubThreadRepository,
+  type PendingThreadAssociation,
   type PendingThreadResolution,
 } from '../storage/github-thread-repository.js';
 import { runMigrations, schemaVersion } from '../storage/migrations/index.js';
@@ -585,6 +586,44 @@ export class JobDatabase {
     this.#githubThreadRepository.recordAssociation(input);
   }
 
+  queueGitHubThreadAssociation(input: {
+    expectedFingerprints: readonly string[];
+    jobId: number;
+    pullRequestNumber: number;
+    repository: string;
+    reviewDatabaseId: number;
+  }): void {
+    this.#githubThreadRepository.queueAssociation(input);
+  }
+
+  nextPendingGitHubThreadAssociation(): PendingThreadAssociation | undefined {
+    return this.#githubThreadRepository.nextPendingAssociation();
+  }
+
+  remainingGitHubThreadAssociationFingerprints(jobId: number): string[] {
+    return this.#githubThreadRepository.remainingAssociationFingerprints(jobId);
+  }
+
+  completeGitHubThreadAssociation(jobId: number): void {
+    this.#githubThreadRepository.completeAssociation(jobId);
+  }
+
+  retryGitHubThreadAssociation(input: {
+    jobId: number;
+    error: string;
+    delayMilliseconds: number;
+  }): void {
+    this.#githubThreadRepository.retryAssociation(input);
+  }
+
+  failGitHubThreadAssociation(input: {
+    jobId: number;
+    error: string;
+    retryDelayMilliseconds: number;
+  }): void {
+    this.#githubThreadRepository.failAssociation(input);
+  }
+
   queueFixedFindingResolutions(input: {
     headSha: string;
     jobId: number;
@@ -611,7 +650,7 @@ export class JobDatabase {
     this.#githubThreadRepository.markRetry(input);
   }
 
-  failThreadResolution(input: { id: number; error: string }): void {
+  failThreadResolution(input: { id: number; error: string; retryDelayMilliseconds: number }): void {
     this.#githubThreadRepository.markFailed(input);
   }
 

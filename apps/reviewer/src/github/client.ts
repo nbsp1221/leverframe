@@ -1,4 +1,5 @@
 import { App } from '@octokit/app';
+import type { ReviewInlineComment } from '../review/publication.js';
 import type { ReviewResult } from '../review/result.js';
 import {
   commandReplyMarker,
@@ -6,19 +7,9 @@ import {
   reviewPublicationMarker,
   statusCommentMarker,
 } from '../identity.js';
-import {
-  type ReviewInlineComment,
-  findingResolutionMarker,
-  parseFindingPublicationMarker,
-} from '../review/publication.js';
 import { renderReview } from '../review/result.js';
 import type { GitHubAppCredentials } from './credentials.js';
-import {
-  addReviewThreadReplyMutation,
-  resolveReviewThreadMutation,
-  reviewThreadQuery,
-  reviewThreadsQuery,
-} from './review-thread-graphql.js';
+import { withGitHubRetry } from './retry.js';
 
 const maximumGitHubBodyCharacters = 60_000;
 
@@ -38,27 +29,6 @@ export interface FindingContext {
   content: string;
   startLine: number;
   endLine: number;
-}
-
-export interface PublishedFindingThread {
-  commentNodeId: string;
-  fingerprint: string;
-  threadNodeId: string;
-}
-
-export interface FindingThreadResolutionResult {
-  alreadyResolved: boolean;
-  resolutionCommentNodeId?: string;
-}
-
-export class GitHubThreadResolutionError extends Error {
-  constructor(
-    message: string,
-    readonly retryable: boolean,
-  ) {
-    super(message);
-    this.name = 'GitHubThreadResolutionError';
-  }
 }
 
 export type CheckConclusion = 'cancelled' | 'failure' | 'neutral' | 'success' | 'timed_out';
@@ -498,163 +468,6 @@ export class GitHubAppClient {
     }
   }
 
-  async findPublishedFindingThreads(input: {
-    expectedFingerprints: ReadonlySet<string>;
-    installationId: number;
-    jobId: number;
-    pullRequestNumber: number;
-    repository: string;
-    reviewDatabaseId: number;
-  }): Promise<PublishedFindingThread[]> {
-    const [owner, repository] = splitRepository(input.repository);
-    const octokit = await this.#app.getInstallationOctokit(input.installationId);
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const candidates = new Map<string, PublishedFindingThread[]>();
-      let after: string | undefined;
-      do {
-        const response: ReviewThreadsQuery = await this.#withRetry(() =>
-          octokit.graphql<ReviewThreadsQuery>(reviewThreadsQuery, {
-            after: after ?? null,
-            owner,
-            pullRequestNumber: input.pullRequestNumber,
-            repository,
-          }),
-        );
-        const connection = response.repository?.pullRequest?.reviewThreads;
-        if (connection === undefined || connection === null) {
-          throw new Error(
-            `pull request not found while locating review threads: ${input.repository}#${input.pullRequestNumber}`,
-          );
-        }
-        for (const thread of connection.nodes ?? []) {
-          if (thread === null) {
-            continue;
-          }
-          for (const comment of thread.comments.nodes ?? []) {
-            if (
-              comment === null ||
-              String(comment.pullRequestReview?.fullDatabaseId) !== String(input.reviewDatabaseId)
-            ) {
-              continue;
-            }
-            const marker = parseFindingPublicationMarker(comment.body);
-            if (
-              marker === undefined ||
-              marker.jobId !== input.jobId ||
-              !input.expectedFingerprints.has(marker.fingerprint)
-            ) {
-              continue;
-            }
-            const matches = candidates.get(marker.fingerprint) ?? [];
-            matches.push({
-              commentNodeId: comment.id,
-              fingerprint: marker.fingerprint,
-              threadNodeId: thread.id,
-            });
-            candidates.set(marker.fingerprint, matches);
-          }
-        }
-        after = connection.pageInfo.hasNextPage
-          ? (connection.pageInfo.endCursor ?? undefined)
-          : undefined;
-      } while (after !== undefined);
-
-      const associations = [...candidates.values()].flatMap((matches) =>
-        matches.length === 1 ? matches : [],
-      );
-      if (associations.length === input.expectedFingerprints.size || attempt === 2) {
-        return associations;
-      }
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 250 * 2 ** attempt);
-      });
-    }
-    return [];
-  }
-
-  async resolveFindingThread(input: {
-    evidence: string;
-    expectedHeadSha: string;
-    fingerprint: string;
-    installationId: number;
-    jobId: number;
-    pullRequestNumber: number;
-    repository: string;
-    signal?: AbortSignal;
-    threadNodeId: string;
-  }): Promise<FindingThreadResolutionResult> {
-    input.signal?.throwIfAborted();
-    const pullRequest = await this.getPullRequest(input);
-    if (pullRequest.headSha !== input.expectedHeadSha) {
-      throw new GitHubThreadResolutionError(
-        `pull request head changed from ${input.expectedHeadSha} to ${pullRequest.headSha} before resolving review thread`,
-        false,
-      );
-    }
-    if (pullRequest.state !== 'open' || pullRequest.draft) {
-      throw new GitHubThreadResolutionError(
-        pullRequest.state !== 'open'
-          ? 'pull request is no longer open before resolving review thread'
-          : 'pull request is a draft before resolving review thread',
-        false,
-      );
-    }
-    input.signal?.throwIfAborted();
-    const octokit = await this.#app.getInstallationOctokit(input.installationId);
-    const marker = findingResolutionMarker(input.jobId, input.fingerprint);
-    let thread = await this.#getReviewThread(octokit, input.threadNodeId);
-    if (thread.isResolved) {
-      return { alreadyResolved: true };
-    }
-    if (!thread.viewerCanResolve) {
-      throw new GitHubThreadResolutionError(
-        `GitHub App cannot resolve review thread ${input.threadNodeId}`,
-        false,
-      );
-    }
-
-    let resolutionCommentNodeId = thread.comments.nodes?.find((comment) =>
-      comment?.body.includes(marker),
-    )?.id;
-    if (resolutionCommentNodeId === undefined) {
-      input.signal?.throwIfAborted();
-      try {
-        const reply = await octokit.graphql<AddReviewThreadReplyMutation>(
-          addReviewThreadReplyMutation,
-          {
-            body: renderResolutionReply(input, marker),
-            threadId: input.threadNodeId,
-          },
-        );
-        resolutionCommentNodeId = reply.addPullRequestReviewThreadReply?.comment?.id;
-      } catch (error) {
-        thread = await this.#getReviewThread(octokit, input.threadNodeId);
-        resolutionCommentNodeId = thread.comments.nodes?.find((comment) =>
-          comment?.body.includes(marker),
-        )?.id;
-        if (resolutionCommentNodeId === undefined) {
-          throw asThreadResolutionError(error);
-        }
-      }
-    }
-
-    input.signal?.throwIfAborted();
-    try {
-      await octokit.graphql<ResolveReviewThreadMutation>(resolveReviewThreadMutation, {
-        threadId: input.threadNodeId,
-      });
-    } catch (error) {
-      thread = await this.#getReviewThread(octokit, input.threadNodeId);
-      if (!thread.isResolved) {
-        throw asThreadResolutionError(error);
-      }
-    }
-    return {
-      alreadyResolved: false,
-      ...(resolutionCommentNodeId === undefined ? {} : { resolutionCommentNodeId }),
-    };
-  }
-
   async #findIssueComment(input: {
     marker: string;
     octokit: Awaited<ReturnType<App['getInstallationOctokit']>>;
@@ -680,32 +493,6 @@ export class GitHubAppClient {
         return undefined;
       }
     }
-  }
-
-  async #getReviewThread(
-    octokit: Awaited<ReturnType<App['getInstallationOctokit']>>,
-    threadNodeId: string,
-  ): Promise<ReviewThreadNode> {
-    const comments: Array<ReviewCommentNode | null> = [];
-    let after: string | undefined;
-    let thread: ReviewThreadNode | undefined;
-    do {
-      const response = await this.#withRetry(() =>
-        octokit.graphql<ReviewThreadQuery>(reviewThreadQuery, {
-          after: after ?? null,
-          threadId: threadNodeId,
-        }),
-      );
-      if (response.node === null || response.node === undefined) {
-        throw new GitHubThreadResolutionError(`review thread ${threadNodeId} was not found`, false);
-      }
-      thread = response.node;
-      comments.push(...(thread.comments.nodes ?? []));
-      after = thread.comments.pageInfo?.hasNextPage
-        ? (thread.comments.pageInfo.endCursor ?? undefined)
-        : undefined;
-    } while (after !== undefined);
-    return { ...thread, comments: { nodes: comments } };
   }
 
   async #updateCheckRun(input: {
@@ -820,83 +607,8 @@ export class GitHubAppClient {
   }
 
   async #withRetry<T>(operation: () => Promise<T>): Promise<T> {
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        return await operation();
-      } catch (error) {
-        const delayMilliseconds = githubRetryDelayMilliseconds(error, attempt);
-        if (delayMilliseconds === undefined || attempt >= 2) {
-          throw error;
-        }
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, delayMilliseconds);
-        });
-      }
-    }
+    return withGitHubRetry(operation);
   }
-}
-
-interface ReviewCommentNode {
-  body: string;
-  id: string;
-  pullRequestReview?: { fullDatabaseId: number | string } | null;
-}
-
-interface ReviewThreadNode {
-  comments: {
-    nodes?: Array<ReviewCommentNode | null> | null;
-    pageInfo?: { endCursor?: string | null; hasNextPage: boolean };
-  };
-  id: string;
-  isResolved: boolean;
-  viewerCanResolve: boolean;
-}
-
-interface ReviewThreadsQuery {
-  repository?: {
-    pullRequest?: {
-      reviewThreads: {
-        nodes?: Array<ReviewThreadNode | null> | null;
-        pageInfo: { endCursor?: string | null; hasNextPage: boolean };
-      };
-    } | null;
-  } | null;
-}
-
-interface ReviewThreadQuery {
-  node?: ReviewThreadNode | null;
-}
-
-interface AddReviewThreadReplyMutation {
-  addPullRequestReviewThreadReply?: { comment?: { id: string } | null } | null;
-}
-
-interface ResolveReviewThreadMutation {
-  resolveReviewThread?: { thread?: { id: string; isResolved: boolean } | null } | null;
-}
-
-function renderResolutionReply(
-  input: { evidence: string; expectedHeadSha: string },
-  marker: string,
-): string {
-  return [
-    `Leverframe verified this finding is fixed in \`${input.expectedHeadSha.slice(0, 12)}\`.`,
-    '',
-    `**Evidence:** ${input.evidence}`,
-    '',
-    marker,
-  ].join('\n');
-}
-
-function asThreadResolutionError(error: unknown): GitHubThreadResolutionError {
-  if (error instanceof GitHubThreadResolutionError) {
-    return error;
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return new GitHubThreadResolutionError(
-    message,
-    githubRetryDelayMilliseconds(error, 0) !== undefined,
-  );
 }
 
 function contextFromPatch(patch: string, targetLine: number): FindingContext | undefined {
@@ -973,42 +685,6 @@ export function limitGitHubBody(
   return `${value.slice(0, Math.max(0, maximumCharacters - notice.length))}${notice}`;
 }
 
-export function githubRetryDelayMilliseconds(error: unknown, attempt: number): number | undefined {
-  const record = asRecord(error);
-  const response = asRecord(record?.response);
-  const headers = asRecord(response?.headers);
-  const status = typeof record?.status === 'number' ? record.status : undefined;
-  const retryAfterSeconds = numericHeader(headers?.['retry-after']);
-  if (status === 429 || status === 502 || status === 503 || status === 504) {
-    return Math.min(
-      30_000,
-      retryAfterSeconds === undefined ? 500 * 2 ** attempt : retryAfterSeconds * 1_000,
-    );
-  }
-  if (
-    status === 403 &&
-    (retryAfterSeconds !== undefined || String(headers?.['x-ratelimit-remaining']) === '0')
-  ) {
-    const resetAtSeconds = numericHeader(headers?.['x-ratelimit-reset']);
-    const resetDelay =
-      resetAtSeconds === undefined ? undefined : resetAtSeconds * 1_000 - Date.now();
-    return Math.min(
-      30_000,
-      Math.max(
-        0,
-        retryAfterSeconds === undefined
-          ? (resetDelay ?? 1_000 * 2 ** attempt)
-          : retryAfterSeconds * 1_000,
-      ),
-    );
-  }
-
-  const code = typeof record?.code === 'string' ? record.code : undefined;
-  return code !== undefined && ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT'].includes(code)
-    ? 500 * 2 ** attempt
-    : undefined;
-}
-
 export function canManageRepositoryRole(role: string): boolean {
   return ['admin', 'maintain', 'triage', 'write'].includes(role);
 }
@@ -1017,12 +693,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
     : undefined;
-}
-
-function numericHeader(value: unknown): number | undefined {
-  const parsed =
-    typeof value === 'string' || typeof value === 'number' ? Number(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function githubErrorStatus(error: unknown): number | undefined {

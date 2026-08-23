@@ -29,7 +29,6 @@ const config = {
   uiBaseUrl: 'https://leverframe.retn0.dev',
   webhookUrl: 'https://example.test/webhooks/github',
   reasoningEffort: 'low' as const,
-  resolveFixedThreads: false,
   resourcesDirectory: '/unused',
 };
 const result = {

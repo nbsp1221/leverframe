@@ -3,11 +3,7 @@ import { join } from 'node:path';
 import type { CredentialStore } from '../github/credentials.js';
 import type { ReviewableLines } from '../review/diff-lines.js';
 import type { SandboxReviewer } from '../sandbox/reviewer.js';
-import {
-  GitHubAppClient,
-  GitHubThreadResolutionError,
-  githubRetryDelayMilliseconds,
-} from '../github/client.js';
+import { GitHubAppClient } from '../github/client.js';
 import { reviewProtocol } from '../identity.js';
 import { selectReviewContext } from '../review/history.js';
 import { prepareReviewPublication } from '../review/publication.js';
@@ -55,7 +51,6 @@ export class ReviewWorker {
       credentials: CredentialStore;
       database: JobDatabase;
       jobsDirectory: string;
-      resolveFixedThreads?: boolean;
       reviewer: SandboxReviewer;
     },
   ) {}
@@ -151,9 +146,6 @@ export class ReviewWorker {
 
   async #loop(): Promise<void> {
     while (this.#running) {
-      if (this.options.resolveFixedThreads === true) {
-        await this.#processNextThreadResolution();
-      }
       const job = this.options.database.claimNextJob();
       if (job === undefined) {
         await new Promise<void>((resolve) => {
@@ -395,8 +387,7 @@ export class ReviewWorker {
         reviewMode,
         signal: controller.signal,
       });
-      const { queuedThreadCount, resolvedThreadCount } = await this.#resolveFixedFindingThreads({
-        controller,
+      const queuedThreadCount = this.#queueFixedFindingThreads({
         job,
         result: review.result,
       });
@@ -414,15 +405,7 @@ export class ReviewWorker {
                 ? `${stillPresentCount} previously reported ${stillPresentCount === 1 ? 'finding remains' : 'findings remain'} unresolved.`
                 : 'No new findings were identified in the incremental changes.'
               : `Published ${findingCount} ${findingLabel} in GitHub review ${reviewId}.`
-          }${
-            resolvedThreadCount === 0
-              ? ''
-              : `\n\n${resolvedThreadCount} fixed review ${resolvedThreadCount === 1 ? 'thread was' : 'threads were'} resolved.`
-          }${
-            queuedThreadCount === resolvedThreadCount
-              ? ''
-              : `\n\n${queuedThreadCount - resolvedThreadCount} fixed review ${queuedThreadCount - resolvedThreadCount === 1 ? 'thread is' : 'threads are'} pending resolution or require operator attention.`
-          }`,
+          }${queuedThreadCount === 0 ? '' : `\n\n${queuedThreadCount} fixed review ${queuedThreadCount === 1 ? 'thread was' : 'threads were'} queued for resolution.`}`,
           title:
             findingCount === 0
               ? stillPresentCount > 0
@@ -443,8 +426,8 @@ export class ReviewWorker {
           reviewBaseSha,
           reviewId,
           reviewMode,
-          pendingThreadResolutionCount: queuedThreadCount - resolvedThreadCount,
-          resolvedThreadCount,
+          pendingThreadResolutionCount: queuedThreadCount,
+          resolvedThreadCount: 0,
         }),
         github,
         job,
@@ -629,124 +612,27 @@ export class ReviewWorker {
         state: 'PUBLISHING',
       });
     }
-    try {
-      const threads = await input.github.findPublishedFindingThreads({
-        expectedFingerprints: new Set(
-          publication.inlineComments.map((comment) => comment.fingerprint),
-        ),
-        installationId: input.job.installationId,
-        jobId: input.job.id,
-        pullRequestNumber: input.job.pullRequestNumber,
-        repository: input.job.repository,
-        reviewDatabaseId: reviewId,
-      });
-      for (const thread of threads) {
-        this.options.database.recordGitHubThreadAssociation({
-          ...thread,
-          jobId: input.job.id,
-          pullRequestNumber: input.job.pullRequestNumber,
-          repository: input.job.repository,
-          reviewDatabaseId: String(reviewId),
-        });
-      }
-      if (threads.length !== publication.inlineComments.length) {
-        console.warn(
-          `associated ${threads.length} of ${publication.inlineComments.length} inline findings for review ${reviewId}`,
-        );
-      }
-    } catch (error) {
-      console.error(`failed to associate GitHub review threads for review ${reviewId}:`, error);
-    }
+    this.options.database.queueGitHubThreadAssociation({
+      expectedFingerprints: publication.inlineComments.map((comment) => comment.fingerprint),
+      jobId: input.job.id,
+      pullRequestNumber: input.job.pullRequestNumber,
+      repository: input.job.repository,
+      reviewDatabaseId: reviewId,
+    });
     return reviewId;
   }
 
-  async #processNextThreadResolution(
-    jobId?: number,
-    signal?: AbortSignal,
-  ): Promise<'deferred' | 'none' | 'resolved'> {
-    signal?.throwIfAborted();
-    const pending = this.options.database.nextPendingThreadResolution(jobId);
-    if (pending === undefined) {
-      return 'none';
+  #queueFixedFindingThreads(input: { job: ReviewJob; result: ReviewResult }): number {
+    if (input.result.finding_updates === undefined) {
+      return 0;
     }
-    if (!this.options.credentials.exists()) {
-      this.options.database.retryThreadResolution({
-        delayMilliseconds: 60_000,
-        error: 'GitHub App credentials are not configured',
-        id: pending.id,
-      });
-      return 'deferred';
-    }
-    try {
-      const result = await new GitHubAppClient(
-        this.options.credentials.read(),
-      ).resolveFindingThread({
-        evidence: pending.evidence,
-        expectedHeadSha: pending.headSha,
-        fingerprint: pending.fingerprint,
-        installationId: pending.installationId,
-        jobId: pending.jobId,
-        pullRequestNumber: pending.pullRequestNumber,
-        repository: pending.repository,
-        ...(signal === undefined ? {} : { signal }),
-        threadNodeId: pending.threadNodeId,
-      });
-      this.options.database.markThreadResolved({
-        id: pending.id,
-        ...(result.resolutionCommentNodeId === undefined
-          ? {}
-          : { resolutionCommentNodeId: result.resolutionCommentNodeId }),
-      });
-      return 'resolved';
-    } catch (error) {
-      if (signal?.aborted === true) {
-        throw error;
-      }
-      const message = sanitizeCheckError(error instanceof Error ? error.message : String(error));
-      const retryable =
-        error instanceof GitHubThreadResolutionError
-          ? error.retryable
-          : githubRetryDelayMilliseconds(error, pending.attempt) !== undefined;
-      if (retryable && pending.attempt < 4) {
-        this.options.database.retryThreadResolution({
-          delayMilliseconds: Math.min(60 * 60_000, 5_000 * 2 ** pending.attempt),
-          error: message,
-          id: pending.id,
-        });
-      } else {
-        this.options.database.failThreadResolution({ error: message, id: pending.id });
-      }
-      console.error(`failed to resolve GitHub review thread ${pending.threadNodeId}: ${message}`);
-      return 'deferred';
-    }
-  }
-
-  async #resolveFixedFindingThreads(input: {
-    controller: AbortController;
-    job: ReviewJob;
-    result: ReviewResult;
-  }): Promise<{ queuedThreadCount: number; resolvedThreadCount: number }> {
-    if (this.options.resolveFixedThreads !== true || input.result.finding_updates === undefined) {
-      return { queuedThreadCount: 0, resolvedThreadCount: 0 };
-    }
-    const queuedThreadCount = this.options.database.queueFixedFindingResolutions({
+    return this.options.database.queueFixedFindingResolutions({
       headSha: input.job.headSha,
       jobId: input.job.id,
       pullRequestNumber: input.job.pullRequestNumber,
       repository: input.job.repository,
       updates: input.result.finding_updates,
     });
-    let resolvedThreadCount = 0;
-    for (let index = 0; index < queuedThreadCount; index += 1) {
-      input.controller.signal.throwIfAborted();
-      if (
-        (await this.#processNextThreadResolution(input.job.id, input.controller.signal)) ===
-        'resolved'
-      ) {
-        resolvedThreadCount += 1;
-      }
-    }
-    return { queuedThreadCount, resolvedThreadCount };
   }
 
   async #loadPolicyInstructions(input: {

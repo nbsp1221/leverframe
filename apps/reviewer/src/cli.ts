@@ -7,6 +7,7 @@ import { GitHubAppClient } from './github/client.js';
 import { CredentialStore } from './github/credentials.js';
 import { ManualCommandHandler } from './jobs/command-handler.js';
 import { JobDatabase } from './jobs/database.js';
+import { ThreadSideEffectWorker } from './jobs/thread-side-effect-worker.js';
 import { ReviewWorker } from './jobs/worker.js';
 import { recoverOrphanSandboxes } from './sandbox/recovery.js';
 import { SandboxReviewer } from './sandbox/reviewer.js';
@@ -77,17 +78,17 @@ function serve(): void {
     credentials,
     database,
     jobsDirectory: config.jobsDirectory,
-    resolveFixedThreads: config.resolveFixedThreads,
     reviewer: new SandboxReviewer({
       model: config.model,
       reasoningEffort: config.reasoningEffort,
       resourcesDirectory: config.resourcesDirectory,
     }),
   });
+  const threadWorker = new ThreadSideEffectWorker({ credentials, database });
   const commandHandler = new ManualCommandHandler({ credentials, database, worker });
   const server = createLeverframeServer(config, database, credentials, {
     isSandboxAvailable: sandboxDaemonAvailable,
-    isWorkerRunning: () => worker.isRunning,
+    isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,
     onJobQueued: (job) => worker.cancelSuperseded(job),
     onManualCommand: (command) => commandHandler.handle(command),
     onPullRequestCancelled: (cancellation) => worker.cancelPullRequest(cancellation),
@@ -116,7 +117,7 @@ function serve(): void {
     });
     void (async () => {
       try {
-        await worker.stop();
+        await Promise.all([worker.stop(), threadWorker.stop()]);
         await serverClosed;
         database.close();
         process.exitCode = 0;
@@ -133,13 +134,14 @@ function serve(): void {
 
   server.listen(config.port, config.host, () => {
     console.log(`Leverframe listening on http://${config.host}:${config.port}`);
-    void startWorkerAfterRecovery(database, worker);
+    void startWorkersAfterRecovery(database, worker, threadWorker);
   });
 }
 
-async function startWorkerAfterRecovery(
+async function startWorkersAfterRecovery(
   database: JobDatabase,
   worker: ReviewWorker,
+  threadWorker: ThreadSideEffectWorker,
 ): Promise<void> {
   try {
     const removed = await recoverOrphanSandboxes(database.getActiveJobIds());
@@ -150,6 +152,7 @@ async function startWorkerAfterRecovery(
     console.warn('orphan review sandbox recovery failed; continuing startup', error);
   }
   worker.start();
+  threadWorker.start();
 }
 
 async function sandboxDaemonAvailable(): Promise<boolean> {

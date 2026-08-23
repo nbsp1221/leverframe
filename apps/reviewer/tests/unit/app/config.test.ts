@@ -16,7 +16,6 @@ describe('server configuration', () => {
         GITHUB_APP_NAME: 'example-leverframe-app',
         REVIEW_MODEL: 'review-model',
         REVIEW_REASONING_EFFORT: 'medium',
-        REVIEW_RESOLVE_FIXED_THREADS: 'true',
       }),
     ).toMatchObject({
       allowedOwnerId: 42,
@@ -29,7 +28,6 @@ describe('server configuration', () => {
       uiBaseUrl: 'https://leverframe.retn0.dev',
       webhookUrl: 'https://github.example.com/webhooks/github',
       reasoningEffort: 'medium',
-      resolveFixedThreads: true,
       resourcesDirectory: join(process.cwd(), 'resources'),
     });
   });
@@ -96,7 +94,6 @@ describe('server configuration', () => {
     ).toMatchObject({
       model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
-      resolveFixedThreads: false,
     });
   });
 

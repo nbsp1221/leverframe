@@ -1,8 +1,8 @@
 # Automatic review thread resolution
 
-Status: Implemented behind a disabled feature flag
+Status: Implemented; live capability gate passed
 
-Decision: No-go for installation-token automatic resolution
+Decision: Go for controlled rollout with the installation token
 
 Last reviewed: 2026-08-23
 
@@ -12,19 +12,22 @@ Leverframe should automatically resolve one of its GitHub inline review threads 
 
 This is a natural extension of the current architecture because Leverframe already carries prior findings into incremental reviews, assigns stable fingerprints, accepts `fixed` and `still_present` finding updates, and persists the reconciled state. The missing capability is a durable association between each published inline finding and its GitHub thread, followed by an idempotent resolution side effect.
 
-The implementation is present behind `REVIEW_RESOLVE_FIXED_THREADS=false`, but it must not be enabled with the current installation-token authentication model. The live capability gate proved that the installation token can publish and discover a marked Leverframe thread but GitHub reports `viewerCanResolve: false` even though the installation has `pull_requests: write`.
+The implementation is always active for validated fixed-finding updates. The live capability gate proved that the installation token can publish, discover, reply to, and resolve a marked Leverframe thread after the installation gained `contents: write`. GitHub continued to report `viewerCanResolve: false`, but the same token successfully executed `resolveReviewThread`; the mutation result is therefore authoritative and the viewer field is diagnostic only for this authentication mode.
 
 ## Live capability result
 
 The capability spike ran on 2026-08-23 against only the designated private repository `nbsp1221/skillpin-private-e2e-20260718` and its existing open PR `#1`. Privacy and PR state were confirmed immediately before each mutation.
 
-- GitHub App installation `154194448` had `pull_requests: write`, `checks: write`, `contents: read`, `issues: read`, and `metadata: read`.
+- The initial test used GitHub App installation `154194448` with `pull_requests: write`, `checks: write`, `contents: read`, `issues: read`, and `metadata: read`.
 - The implementation published review `5002524379` with marker `<!-- leverframe:finding:e59853ea8e734f3c:job:1787492799742 -->` and associated it uniquely with thread `PRRT_kwDOTcbuks6bfpbe`.
-- The installation-scoped GraphQL query returned `viewerCanResolve: false`; `GitHubAppClient.resolveFindingThread` correctly stopped before posting a reply or calling `resolveReviewThread`.
+- The initial installation-scoped GraphQL query returned `viewerCanResolve: false`; the original implementation stopped before posting a reply or calling `resolveReviewThread`.
 - The repository owner resolved that exact QA thread for cleanup. A second call through the installation-scoped implementation returned `{ "alreadyResolved": true }` without another mutation.
+- After `contents: write` was approved on the installation, a newly published App-owned thread still returned `viewerCanResolve: false`, but a direct `resolveReviewThread` call with the same installation token succeeded. This proved the viewer field is a false-negative capability signal for this App token.
+- The production client was changed to attempt the mutation and classify its actual response instead of blocking on `viewerCanResolve`. Review `5002576144`, job `1787494409910`, fingerprint `c1a49e1b6650e02b`, and thread `PRRT_kwDOTcbuks6bfy9q` then completed the full path: unique marker association, one evidence reply by `leverframe`, successful resolution, and an idempotent second call returning `{ "alreadyResolved": true }`.
+- After the structural refactor, review `5002667973`, fingerprint `f86731fcf6743044`, and thread `PRRT_kwDOTcbuks6bgDpP` exercised the production-shaped durable path: association intent persistence, independent worker discovery, the completed-review eligibility gate, one evidence reply by `leverframe`, validated resolve mutation response, local `RESOLVED` persistence, and an idempotent second call returning `{ "alreadyResolved": true }`.
 - No new PR was created and no other repository was used.
 
-This is a release blocker, not an implementation defect. GitHub's schema exposes the mutation to installation tokens, but the live authorization result shows that repository permission alone does not make the App viewer eligible to resolve this conversation. The next architecture decision is whether to add an explicitly authorized GitHub App user-to-server token or retain manual thread resolution. That authentication expansion requires a separate approved design because Leverframe currently stores no GitHub user client secret or OAuth grant.
+The authorization blocker is resolved without adding a user-to-server token. The live result establishes that `viewerCanResolve` cannot be used as a precondition for installation-token mutations; a permanent GraphQL authorization response from `resolveReviewThread` remains the authoritative failure signal.
 
 ## Problem
 
@@ -103,7 +106,8 @@ Finding reconciliation
 ├─ STILL_PRESENT
 └─ FIXED
 
-GitHub thread publication
+GitHub thread side-effect worker
+├─ consume durable association and resolution queues independently of review execution
 ├─ associate inline findings with thread node IDs
 ├─ post resolution evidence idempotently
 └─ resolve eligible threads idempotently
@@ -212,7 +216,7 @@ mutation ResolveLeverframeReviewThread($threadId: ID!) {
 
 The installed Octokit client exposes a GraphQL client on the installation-scoped Octokit instance. Installation access tokens can call GraphQL with the app's repository permissions. GitHub advises testing GraphQL operations because its reference does not publish a complete mutation-to-App-permission table.
 
-The live test disproved the assumption that the current manifest's `pull_requests: write` permission is sufficient for an installation token. The implementation checks `viewerCanResolve` and treats `false` as a permanent, operator-visible failure. GitHub's official guidance remains to test GraphQL operations because the reference does not publish a complete mutation-to-App-permission table.
+The live test showed that the current installation needs the approved `contents: write` permission in addition to `pull_requests: write`. It also showed that `viewerCanResolve` remains false even when `resolveReviewThread` succeeds, so the implementation attempts the mutation and treats its response as authoritative. GitHub's official guidance remains to test GraphQL operations because the reference does not publish a complete mutation-to-App-permission table.
 
 GitHub documentation:
 
@@ -280,9 +284,9 @@ After a review with inline comments is accepted or reconciled:
 4. Match each marker to the expected publication job and calculated fingerprint.
 5. Require one and only one matching thread.
 6. Persist the thread and comment node IDs transactionally.
-7. Leave ambiguous or missing associations untracked and observable; do not infer by path and line.
+7. Keep ambiguous or missing associations pending and observable; do not infer by path and line.
 
-Association is retryable without republishing the review during the active publication pass. The implementation polls a missing association three times with bounded backoff. If it remains missing or ambiguous, it logs the mismatch and does not infer by path or line. A durable association-repair queue remains future work and is not required while resolution is release-blocked and disabled.
+Association is retryable without republishing the review. Review publication writes a `github_thread_association_intents` row containing the review ID and expected fingerprints, then completes independently. The thread side-effect worker polls GitHub with bounded immediate backoff; after the immediate budget is exhausted, the intent remains `FAILED` with a scheduled low-frequency recovery attempt. Missing associations appear as pending or failed thread state in the private review API.
 
 ## Resolution eligibility
 
@@ -294,7 +298,7 @@ A thread is eligible for automatic resolution only when all of these conditions 
 - The update evidence is non-empty after trimming and passes the configured body and redaction limits.
 - A unique persisted or freshly reconciled Leverframe thread association exists.
 - The associated thread is not already resolved.
-- The GitHub query reports `viewerCanResolve: true`.
+- The installation has the approved repository permissions required by the live capability gate; `viewerCanResolve` is recorded only as diagnostic metadata.
 - The current GitHub PR head still equals the job's verified `headSha` immediately before resolution publication begins.
 - The worker attempt remains current and has not been cancelled or superseded.
 - The finding was published inline; summary-only findings are not eligible.
@@ -332,13 +336,13 @@ Recommended order:
 2. Persist the validated review artifact.
 3. Reconcile local finding states.
 4. Publish or reconcile the new GitHub review.
-5. Reconcile GitHub thread associations for newly published findings.
+5. Queue durable GitHub thread association work for newly published findings.
 6. Create durable resolution intents for eligible fixed findings.
-7. Recheck the PR head and cancellation state.
-8. Post the idempotent evidence reply.
-9. Resolve the thread with an idempotent GraphQL mutation.
-10. Persist the resolved observation.
-11. Complete the Check Run and status comment.
+7. Complete the Check Run, status comment, and review job without waiting for GitHub thread side effects.
+8. In the independent thread worker, reconcile associations and recheck the PR head.
+9. Post the idempotent evidence reply.
+10. Resolve the thread with an idempotent GraphQL mutation.
+11. Persist the resolved observation.
 ```
 
 The evidence reply uses a unique hidden resolution marker. Before posting, the client searches the associated thread for that marker so a lost response cannot create duplicate replies.
@@ -349,9 +353,9 @@ The resolve mutation is naturally idempotent when preceded by an `isResolved` qu
 
 No. A successfully completed code review should not be rerun because a thread-management side effect temporarily failed. The job should reach `DONE`, while the durable thread row remains `RESOLUTION_PENDING` or `RESOLUTION_FAILED`. The Check Run summary and private UI should expose the degraded resolution count.
 
-A small retry pass in the existing worker loop can process pending resolution intents without invoking the sandbox reviewer again. This avoids duplicate model cost and keeps GitHub failures separate from review correctness.
+A dedicated thread side-effect worker processes association and resolution intents without invoking the sandbox reviewer. This prevents a GitHub outage from blocking unrelated code reviews, avoids duplicate model cost, and gives the side effects an independent lifecycle.
 
-Permanent failures such as `viewerCanResolve: false`, a missing thread, or a GraphQL authorization error should remain observable and require operator action. Transient network, rate-limit, and 5xx failures should use bounded retries and later durable retry.
+Transient network, rate-limit, eventual-consistency, and 5xx failures use bounded immediate retries. Missing threads, invalid mutation payloads, authorization failures, and exhausted retries remain observable as `FAILED` but receive scheduled low-frequency recovery; a later verified `fixed` update also requeues a failed resolution. `viewerCanResolve` is diagnostic only and is never treated as a failure by itself.
 
 ## Concurrency and cancellation
 
@@ -376,13 +380,7 @@ This is intentionally conservative because the old thread may be outdated and a 
 
 ## Configuration
 
-Do not make automatic resolution configurable in the first internal-only release. The feature should be guarded by an application-level environment flag during development and live validation:
-
-```text
-REVIEW_RESOLVE_FIXED_THREADS=false
-```
-
-After live validation, remove the temporary flag or default it to true for this single-operator MVP. A repository policy setting can be added when Leverframe supports multiple repositories with different operator requirements. Adding policy syntax now would expand the feature beyond the immediate need.
+Automatic resolution is not configurable in the first internal-only release. The temporary development flag was removed after the private live capability gate passed because a default-off environment variable could silently disable the feature and split the worker across two operational modes. A repository policy setting can be added when Leverframe supports multiple repositories with different operator requirements. Adding policy syntax now would expand the feature beyond the immediate need.
 
 ## Observability
 
@@ -417,13 +415,13 @@ The review detail API exposes resolution data per finding so an operator can exp
 - In the designated private live-test repository, confirm immediately before the test that the repository is private and PR `#1` is open.
 - Publish one uniquely marked Leverframe test thread through the normal review mechanism or use an existing Leverframe-owned test thread.
 - Query `reviewThreads` with the existing installation-scoped Octokit GraphQL client.
-- Verify `viewerCanResolve` is true.
+- Record `viewerCanResolve` for diagnostics without using it as a mutation gate.
 - Resolve the test thread with `resolveReviewThread`.
 - Query it again and verify `isResolved` is true.
 - Record the exact GraphQL shapes in a fixture and remove any temporary test content only when doing so is safe and explicitly within the test procedure.
 - Do not use another repository or PR for live validation.
 
-Result: failed. The existing installation token can query and associate its own thread but reports `viewerCanResolve: false`. Automatic resolution remains disabled.
+Result: passed after approving `contents: write` and removing the false-negative `viewerCanResolve` gate. The existing installation token published and associated its own thread, posted exactly one evidence reply, resolved the thread, and treated a repeated resolution call as already resolved.
 
 ### Phase 1: Deterministic identities and validation
 
@@ -437,24 +435,24 @@ Result: implemented and covered by unit tests. Every new inline finding has a de
 
 ### Phase 2: Durable thread associations
 
-- Add migration 4 for `github_finding_threads` and required indexes.
+- Add migration 4 for `github_finding_threads`, migration 5 for durable association intents, and required indexes.
 - Add a focused repository class for thread association and resolution state rather than expanding `JobDatabase` SQL directly.
-- Implement paginated GraphQL thread discovery in `GitHubAppClient`.
+- Implement paginated GraphQL thread discovery in a focused `GitHubReviewThreadClient`.
 - Reconcile markers after successful or recovered review publication.
 - Add integration tests for migration idempotence, uniqueness, missing associations, ambiguous associations, and restart recovery.
 
-Result: implemented prospectively. Each eligible newly published inline finding has one durable GitHub thread node ID, while missing or ambiguous associations are logged and never inferred from path or line.
+Result: implemented. Each eligible newly published inline finding creates a durable association intent. Unique matches produce a durable GitHub thread node ID; missing or ambiguous matches remain observable and retryable and are never inferred from path and line.
 
 ### Phase 3: Resolution publication
 
 - Create durable resolution intents from validated `fixed` updates.
-- Implement thread-state refresh, `viewerCanResolve` enforcement, evidence reply reconciliation, and `resolveReviewThread`.
+- Implement thread-state refresh, diagnostic `viewerCanResolve` capture, evidence reply reconciliation, and `resolveReviewThread` payload validation.
 - Recheck the PR head and worker attempt before the first resolution side effect.
 - Keep resolution failures separate from review job completion.
 - Add bounded retry for pending intents without rerunning the sandbox.
 - Update Check Run and status-comment summaries with resolution counts.
 
-Result: implemented and covered by mocked response-loss and restart tests, but live resolution is blocked by GitHub authorization before the first mutation.
+Result: implemented and covered by mocked response-loss, invalid-payload, durable-recovery, and restart tests. The private live capability gate passed after the installation permission update.
 
 ### Phase 4: Operator visibility and rollout
 
@@ -463,9 +461,9 @@ Result: implemented and covered by mocked response-loss and restart tests, but l
 - Add Korean and English messages.
 - Run unit, integration, executable E2E, and web E2E tests.
 - Run the constrained private live test for a normal fix, a still-present finding, an already manually resolved thread, and an ambiguous API failure if it can be simulated without affecting other repositories.
-- Keep the feature disabled until the authorization blocker is resolved, then monitor the first representative reviews after a successful repeated capability gate.
+- Keep the feature always active after the authorization gate, and monitor the first representative reviews plus the durable association and resolution failure states.
 
-Result: implemented in the review detail API and web view. Rollout remains blocked by Phase 0.
+Result: implemented in the review detail API and web view. The authorization gate passed and the temporary feature flag was removed.
 
 ## Test matrix
 
@@ -496,7 +494,7 @@ Result: implemented in the review detail API and web view. Rollout remains block
 Use only `nbsp1221/skillpin-private-e2e-20260718` and existing PR `#1`, as required by repository instructions. Confirm privacy and open state immediately before every live test.
 
 - Leverframe-authored inline thread can be discovered by marker.
-- Existing App installation token reports `viewerCanResolve: true`.
+- Existing App installation token may report `viewerCanResolve: false`; this does not block the mutation.
 - `resolveReviewThread` resolves the expected thread.
 - A second resolution attempt is idempotent.
 - A human-resolved thread is treated as success without another mutation.
@@ -505,8 +503,8 @@ Use only `nbsp1221/skillpin-private-e2e-20260718` and existing PR `#1`, as requi
 
 ## Rollback
 
-- Disable `REVIEW_RESOLVE_FIXED_THREADS` to stop new resolution intents without stopping reviews.
-- Pending intents remain durable but are not processed while disabled.
+- Stop or roll back the updated worker to stop new resolution intents and side effects.
+- Pending intents remain durable across a worker restart or deployment rollback.
 - The additive migration does not modify existing review artifacts or finding rows.
 - Previously resolved GitHub threads are not automatically unresolved during rollback.
 - Restore the previous application image if necessary; the older version should ignore the additive table after the normal SQLite backup procedure.
@@ -537,7 +535,7 @@ Use only `nbsp1221/skillpin-private-e2e-20260718` and existing PR `#1`, as requi
 
 ### Blocking release gates
 
-- The private capability spike returned `viewerCanResolve: false` with the real installation token, so `resolveReviewThread` was not attempted through that token.
+- The private capability spike succeeds with the real installation token despite the false-negative `viewerCanResolve` field.
 - Thread identity must be marker-based and durable before any automatic resolution is enabled.
 - Invalid or unknown finding updates must be unable to trigger a mutation.
 - Resolution failures must not cause sandbox reviews to rerun.
@@ -546,4 +544,4 @@ Use only `nbsp1221/skillpin-private-e2e-20260718` and existing PR `#1`, as requi
 
 ### Final assessment
 
-Do not enable automatic resolution with the current installation-token architecture. The one-agent semantic design, deterministic association, durable intent handling, UI visibility, and idempotent client behavior are implemented and testable, but the mandatory Phase 0 gate returned `viewerCanResolve: false` with the real App installation. Per the original stop condition, no additional scope or user authorization flow was added. Resume only after approving and designing a user-to-server authorization model, or after GitHub changes the installation-token capability and the same constrained live gate passes.
+Proceed with a controlled rollout using the current installation-token architecture. The one-agent semantic design, deterministic association, durable intent handling, UI visibility, idempotent client behavior, and mandatory private capability gate are complete. The updated worker processes validated fixed-finding updates without a separate feature flag; monitor the first representative incremental reviews after deployment. No user-to-server authorization flow is required.

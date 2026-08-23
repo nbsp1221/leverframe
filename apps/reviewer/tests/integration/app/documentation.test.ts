@@ -40,7 +40,6 @@ async function fixture(): Promise<string> {
       uiBaseUrl: 'https://leverframe.retn0.dev',
       webhookUrl: 'https://github.example.com/webhooks/github',
       reasoningEffort: 'low',
-      resolveFixedThreads: false,
       resourcesDirectory: join(directory, 'resources'),
     },
     database,

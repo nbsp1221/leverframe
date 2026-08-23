@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CredentialStore, GitHubAppCredentials } from '../../../src/github/credentials.js';
 import type { SandboxReviewer } from '../../../src/sandbox/reviewer.js';
 import { JobDatabase } from '../../../src/jobs/database.js';
+import { ThreadSideEffectWorker } from '../../../src/jobs/thread-side-effect-worker.js';
 import { ReviewWorker } from '../../../src/jobs/worker.js';
 
 const githubMocks = vi.hoisted(() => ({
@@ -277,38 +278,12 @@ describe('ReviewWorker publication cancellation', () => {
         webhookSecret: 'secret',
       }),
     } as unknown as CredentialStore;
-    const reviewSandbox = vi.fn(() => {
-      throw new Error('sandbox review must not run for thread resolution');
-    });
-    const reviewer = {
-      review: reviewSandbox,
-    } as unknown as SandboxReviewer;
-    const worker = new ReviewWorker({
-      allowedOwnerId: 1,
-      credentials,
-      database,
-      jobsDirectory: join(directory, 'jobs'),
-      resolveFixedThreads: true,
-      reviewer,
-    });
-
-    worker.start();
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (
-        database.getFindingThreadStatuses('example/project', 7)[0]?.resolutionState === 'RESOLVED'
-      ) {
-        break;
-      }
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 10);
-      });
-    }
-    await worker.stop();
+    const worker = new ThreadSideEffectWorker({ credentials, database });
+    await expect(worker.runOnce()).resolves.toBe(true);
 
     expect(database.getFindingThreadStatuses('example/project', 7)[0]).toMatchObject({
       resolutionState: 'RESOLVED',
     });
-    expect(reviewSandbox).not.toHaveBeenCalled();
     expect(githubMocks.graphql).toHaveBeenCalledTimes(3);
     database.close();
   });
