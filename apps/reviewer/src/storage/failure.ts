@@ -33,7 +33,7 @@ export function redactSensitiveText(
     )
     .replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, '[REDACTED_TOKEN]')
     .replace(
-      /(\b(?:[A-Za-z0-9]+[_.-])*(?:secret|token|key|password|credential)(?:[_.-][A-Za-z0-9]+)*\s*(?:=|:)\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s]+)/gi,
+      /(["']?\b(?:[A-Za-z0-9]+[_.-])*(?:secret|token|key|password|credential)(?:[_.-][A-Za-z0-9]+)*["']?\s*(?:=|:)\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s]+)/gi,
       '$1[REDACTED]',
     );
   for (const [key, secret] of Object.entries(environment)) {

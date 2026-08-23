@@ -98,6 +98,21 @@ describe('execution trace', () => {
     );
   });
 
+  it('redacts JSON-formatted sandbox credentials absent from the reviewer environment', () => {
+    const store = fixture();
+    const secret = 'abcdefghijklmnopqrstuvwxyz0123456789ABCD';
+    store.append(10, 1, {
+      type: 'command_completed',
+      output: JSON.stringify({ AWS_SECRET_ACCESS_KEY: secret, safe: 'visible' }),
+    });
+
+    const output = store.read(10, 1).events[0]?.output;
+    expect(output).not.toContain(secret);
+    expect(output).toContain('AWS_SECRET_ACCESS_KEY');
+    expect(output).toContain('[REDACTED]');
+    expect(output).toContain('visible');
+  });
+
   it('records one notice for malformed and unsupported Codex events', () => {
     const store = fixture();
     const recorder = new CodexExecutionRecorder(store, 11, 1);
