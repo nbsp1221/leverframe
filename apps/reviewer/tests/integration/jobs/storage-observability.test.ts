@@ -118,7 +118,7 @@ describe('review observability storage', () => {
       legacy.exec('DELETE FROM schema_migrations');
       legacy.close();
       const migrated = new JobDatabase(path, { dataRoot: root });
-      expect(migrated.getSchemaVersion()).toBe(3);
+      expect(migrated.getSchemaVersion()).toBe(4);
       expect(migrated.countJobs()).toBe(1);
       migrated.close();
 

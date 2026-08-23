@@ -260,6 +260,11 @@ function Findings({
                   <span className="text-xs text-muted-foreground">{t('confidence')}</span>
                   <Badge variant="outline">{t(finding.confidence)}</Badge>
                   <Badge variant="outline">{t(finding.state ?? 'open')}</Badge>
+                  {finding.thread_resolution ? (
+                    <Badge variant="outline">
+                      {t(`thread_resolution_${finding.thread_resolution.state}`)}
+                    </Badge>
+                  ) : null}
                 </div>
               </div>
               <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6">

@@ -276,6 +276,40 @@ export const migrations: readonly Migration[] = [
         ON evaluation_revisions(job_id, target_type, finding_fingerprint, id DESC);
     `),
   },
+  {
+    version: 4,
+    name: 'github-finding-threads',
+    apply: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS github_finding_threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        repository TEXT NOT NULL,
+        pull_request_number INTEGER NOT NULL,
+        fingerprint TEXT NOT NULL,
+        publication_job_id INTEGER NOT NULL REFERENCES review_jobs(id),
+        review_database_id TEXT NOT NULL,
+        thread_node_id TEXT NOT NULL UNIQUE,
+        comment_node_id TEXT NOT NULL,
+        resolution_state TEXT NOT NULL DEFAULT 'OPEN'
+          CHECK(resolution_state IN ('OPEN','RESOLUTION_PENDING','RESOLVED','RESOLUTION_FAILED')),
+        resolved_by_job_id INTEGER REFERENCES review_jobs(id),
+        resolved_head_sha TEXT,
+        resolution_evidence TEXT,
+        resolution_comment_node_id TEXT,
+        resolution_attempts INTEGER NOT NULL DEFAULT 0,
+        next_resolution_at TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        resolved_at TEXT,
+        UNIQUE(publication_job_id, fingerprint)
+      );
+      CREATE INDEX IF NOT EXISTS github_finding_threads_target_idx
+        ON github_finding_threads(repository, pull_request_number, fingerprint, id DESC);
+      CREATE INDEX IF NOT EXISTS github_finding_threads_pending_idx
+        ON github_finding_threads(resolution_state, next_resolution_at, id);
+    `),
+  },
 ];
 
 export function runMigrations(database: DatabaseSync): number {
@@ -343,6 +377,14 @@ export function runMigrations(database: DatabaseSync): number {
     !evaluationColumns.has('action')
   ) {
     throw new Error('incompatible evaluation_revisions schema');
+  }
+  const threadColumns = columns(database, 'github_finding_threads');
+  if (
+    !threadColumns.has('thread_node_id') ||
+    !threadColumns.has('resolution_state') ||
+    !threadColumns.has('resolution_attempts')
+  ) {
+    throw new Error('incompatible github_finding_threads schema');
   }
   return latest;
 }

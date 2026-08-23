@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../../src/review/result.js';
 import { GitHubAppClient } from '../../../src/github/client.js';
-import { prepareReviewPublication } from '../../../src/review/publication.js';
+import {
+  findingPublicationMarker,
+  parseFindingPublicationMarker,
+  prepareReviewPublication,
+} from '../../../src/review/publication.js';
 
 const githubMocks = vi.hoisted(() => ({
   getInstallationOctokit: vi.fn(),
@@ -54,6 +58,7 @@ describe('review publication preparation', () => {
     const publication = prepareReviewPublication(
       result,
       new Map([['src/changed.ts', new Set([7])]]),
+      42,
     );
 
     expect(publication.inlineFindingIndexes).toEqual(new Set([0]));
@@ -61,6 +66,25 @@ describe('review publication preparation', () => {
       expect.objectContaining({ line: 7, path: 'src/changed.ts' }),
     ]);
     expect(publication.inlineComments[0]?.body).toContain('🟠 **[HIGH] Return contract changed**');
+    expect(publication.inlineComments[0]?.body).toContain('<!-- leverframe:finding:');
+    expect(parseFindingPublicationMarker(publication.inlineComments[0]?.body ?? '')).toEqual({
+      fingerprint: publication.inlineComments[0]?.fingerprint,
+      jobId: 42,
+    });
+  });
+
+  it('parses exactly one trusted finding marker', () => {
+    const marker = findingPublicationMarker(7, '0123456789abcdef');
+
+    expect(parseFindingPublicationMarker(`body\n\n${marker}`)).toEqual({
+      fingerprint: '0123456789abcdef',
+      jobId: 7,
+    });
+    expect(parseFindingPublicationMarker(`${marker}\n${marker}`)).toBeUndefined();
+    expect(
+      parseFindingPublicationMarker('<!-- leverframe:finding:invalid:job:7 -->'),
+    ).toBeUndefined();
+    expect(() => findingPublicationMarker(0, '0123456789abcdef')).toThrow();
   });
 });
 

@@ -10,6 +10,7 @@ import { ReviewWorker } from '../../../src/jobs/worker.js';
 const githubMocks = vi.hoisted(() => ({
   appRequest: vi.fn(),
   getInstallationOctokit: vi.fn(),
+  graphql: vi.fn(),
   installationRequest: vi.fn(),
 }));
 
@@ -170,6 +171,145 @@ describe('ReviewWorker publication cancellation', () => {
     expect(reviewListSeen).toBe(true);
     expect(reviewPostRequests).toBe(0);
     expect(database.getLatestJobStatus('example/project', 7)?.state).not.toBe('DONE');
+    database.close();
+  });
+
+  it('resolves durable pending threads without rerunning the sandbox review', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'leverframe-worker-resolution-'));
+    temporaryDirectories.push(directory);
+    const database = new JobDatabase(':memory:');
+    const headSha = 'b'.repeat(40);
+    database.enqueuePullRequest({
+      action: 'opened',
+      deliveryId: 'publication',
+      headSha: 'a'.repeat(40),
+      installationId: 42,
+      policyVersion: 'v1',
+      pullRequestNumber: 7,
+      repository: 'example/project',
+    });
+    const publicationJob = database.claimNextJob();
+    if (publicationJob === undefined) {
+      throw new Error('expected a publication job');
+    }
+    database.recordGitHubThreadAssociation({
+      commentNodeId: 'comment-1',
+      fingerprint: '1234567890abcdef',
+      jobId: publicationJob.id,
+      pullRequestNumber: 7,
+      repository: 'example/project',
+      reviewDatabaseId: '99',
+      threadNodeId: 'thread-1',
+    });
+    database.updateJob({ id: publicationJob.id, state: 'DONE' });
+    database.enqueuePullRequest({
+      action: 'synchronize',
+      deliveryId: 'resolution',
+      headSha,
+      installationId: 42,
+      policyVersion: 'v1',
+      pullRequestNumber: 7,
+      repository: 'example/project',
+    });
+    const resolutionJob = database.claimNextJob();
+    if (resolutionJob === undefined) {
+      throw new Error('expected a resolution job');
+    }
+    database.queueFixedFindingResolutions({
+      headSha,
+      jobId: resolutionJob.id,
+      pullRequestNumber: 7,
+      repository: 'example/project',
+      updates: [
+        {
+          evidence: 'The condition is now correct.',
+          fingerprint: '1234567890abcdef',
+          status: 'fixed',
+        },
+      ],
+    });
+    database.updateJob({ id: resolutionJob.id, state: 'DONE' });
+
+    githubMocks.getInstallationOctokit.mockResolvedValue({
+      graphql: githubMocks.graphql,
+      request: githubMocks.installationRequest,
+    });
+    githubMocks.installationRequest.mockResolvedValue({
+      data: {
+        base: {
+          ref: 'main',
+          repo: {
+            clone_url: 'https://github.com/example/project.git',
+            default_branch: 'main',
+            id: 99,
+          },
+          sha: '0'.repeat(40),
+        },
+        draft: false,
+        head: { sha: headSha },
+        state: 'open',
+        title: 'Test pull request',
+      },
+    });
+    githubMocks.graphql
+      .mockResolvedValueOnce({
+        node: {
+          comments: { nodes: [] },
+          id: 'thread-1',
+          isResolved: false,
+          viewerCanResolve: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        addPullRequestReviewThreadReply: { comment: { id: 'resolution-comment' } },
+      })
+      .mockResolvedValueOnce({
+        resolveReviewThread: { thread: { id: 'thread-1', isResolved: true } },
+      });
+    const credentials = {
+      exists: () => true,
+      read: (): GitHubAppCredentials => ({
+        appId: 1,
+        clientId: 'client',
+        name: 'leverframe',
+        privateKey: 'private-key',
+        slug: 'leverframe',
+        webhookSecret: 'secret',
+      }),
+    } as unknown as CredentialStore;
+    const reviewSandbox = vi.fn(() => {
+      throw new Error('sandbox review must not run for thread resolution');
+    });
+    const reviewer = {
+      review: reviewSandbox,
+    } as unknown as SandboxReviewer;
+    const worker = new ReviewWorker({
+      allowedOwnerId: 1,
+      credentials,
+      database,
+      jobsDirectory: join(directory, 'jobs'),
+      resolveFixedThreads: true,
+      reviewer,
+    });
+
+    worker.start();
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (
+        database.getFindingThreadStatuses('example/project', 7)[0]?.resolutionState === 'RESOLVED'
+      ) {
+        break;
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
+    await worker.stop();
+
+    expect(database.getFindingThreadStatuses('example/project', 7)[0]).toMatchObject({
+      resolutionState: 'RESOLVED',
+    });
+    expect(reviewSandbox).not.toHaveBeenCalled();
+    expect(githubMocks.graphql).toHaveBeenCalledTimes(3);
     database.close();
   });
 });

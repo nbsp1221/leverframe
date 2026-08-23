@@ -10,6 +10,7 @@ import {
 const githubMocks = vi.hoisted(() => ({
   appRequest: vi.fn(),
   getInstallationOctokit: vi.fn(),
+  graphql: vi.fn(),
   installationRequest: vi.fn(),
 }));
 
@@ -25,6 +26,7 @@ vi.mock('@octokit/app', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   githubMocks.getInstallationOctokit.mockResolvedValue({
+    graphql: githubMocks.graphql,
     request: githubMocks.installationRequest,
   });
 });
@@ -124,3 +126,171 @@ describe('manual command reply delivery', () => {
     expect(commentLookups).toBe(3);
   });
 });
+
+describe('review thread lifecycle', () => {
+  it('associates only unambiguous markers from the published review', async () => {
+    githubMocks.graphql.mockResolvedValue({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [
+              {
+                comments: {
+                  nodes: [
+                    {
+                      body: '<!-- leverframe:finding:1234567890abcdef:job:7 -->',
+                      id: 'comment-1',
+                      pullRequestReview: { fullDatabaseId: '99' },
+                    },
+                  ],
+                },
+                id: 'thread-1',
+                isResolved: false,
+                viewerCanResolve: true,
+              },
+              {
+                comments: {
+                  nodes: [
+                    {
+                      body: '<!-- leverframe:finding:fedcba0987654321:job:8 -->',
+                      id: 'comment-other-job',
+                      pullRequestReview: { fullDatabaseId: '99' },
+                    },
+                  ],
+                },
+                id: 'thread-other-job',
+                isResolved: false,
+                viewerCanResolve: true,
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+    });
+    const client = createClient();
+
+    await expect(
+      client.findPublishedFindingThreads({
+        expectedFingerprints: new Set(['1234567890abcdef']),
+        installationId: 42,
+        jobId: 7,
+        pullRequestNumber: 3,
+        repository: 'example/project',
+        reviewDatabaseId: 99,
+      }),
+    ).resolves.toEqual([
+      {
+        commentNodeId: 'comment-1',
+        fingerprint: '1234567890abcdef',
+        threadNodeId: 'thread-1',
+      },
+    ]);
+  });
+
+  it('reconciles an accepted reply before resolving the thread', async () => {
+    githubMocks.installationRequest.mockResolvedValue({
+      data: pullRequestResponse('b'.repeat(40)),
+    });
+    githubMocks.graphql
+      .mockResolvedValueOnce({
+        node: {
+          comments: { nodes: [] },
+          id: 'thread-1',
+          isResolved: false,
+          viewerCanResolve: true,
+        },
+      })
+      .mockRejectedValueOnce(new Error('connection lost'))
+      .mockResolvedValueOnce({
+        node: {
+          comments: {
+            nodes: [
+              {
+                body: '<!-- leverframe:resolution:1234567890abcdef:job:8 -->',
+                id: 'resolution-comment',
+              },
+            ],
+          },
+          id: 'thread-1',
+          isResolved: false,
+          viewerCanResolve: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        resolveReviewThread: { thread: { id: 'thread-1', isResolved: true } },
+      });
+    const client = createClient();
+
+    await expect(
+      client.resolveFindingThread({
+        evidence: 'The condition is now correct.',
+        expectedHeadSha: 'b'.repeat(40),
+        fingerprint: '1234567890abcdef',
+        installationId: 42,
+        jobId: 8,
+        pullRequestNumber: 3,
+        repository: 'example/project',
+        threadNodeId: 'thread-1',
+      }),
+    ).resolves.toEqual({
+      alreadyResolved: false,
+      resolutionCommentNodeId: 'resolution-comment',
+    });
+    expect(githubMocks.graphql).toHaveBeenCalledTimes(4);
+  });
+
+  it('treats viewerCanResolve false as a permanent failure before mutation', async () => {
+    githubMocks.installationRequest.mockResolvedValue({
+      data: pullRequestResponse('b'.repeat(40)),
+    });
+    githubMocks.graphql.mockResolvedValue({
+      node: {
+        comments: { nodes: [] },
+        id: 'thread-1',
+        isResolved: false,
+        viewerCanResolve: false,
+      },
+    });
+    const client = createClient();
+
+    await expect(
+      client.resolveFindingThread({
+        evidence: 'The condition is now correct.',
+        expectedHeadSha: 'b'.repeat(40),
+        fingerprint: '1234567890abcdef',
+        installationId: 42,
+        jobId: 8,
+        pullRequestNumber: 3,
+        repository: 'example/project',
+        threadNodeId: 'thread-1',
+      }),
+    ).rejects.toMatchObject({ retryable: false });
+    expect(githubMocks.graphql).toHaveBeenCalledTimes(1);
+  });
+});
+
+function createClient(): GitHubAppClient {
+  return new GitHubAppClient({
+    appId: 1,
+    clientId: 'client',
+    name: 'leverframe',
+    privateKey: 'private-key',
+    slug: 'leverframe',
+    webhookSecret: 'secret',
+  });
+}
+
+function pullRequestResponse(headSha: string) {
+  return {
+    base: {
+      ref: 'main',
+      repo: { clone_url: 'https://github.com/example/project.git', default_branch: 'main', id: 1 },
+      sha: 'a'.repeat(40),
+    },
+    draft: false,
+    head: { sha: headSha },
+    state: 'open',
+    title: 'Test pull request',
+  };
+}

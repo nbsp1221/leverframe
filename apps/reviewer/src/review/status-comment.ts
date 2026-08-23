@@ -37,6 +37,8 @@ export function renderCompletedComment(input: {
   reviewBaseSha: string;
   reviewId: number | undefined;
   reviewMode: 'full' | 'incremental';
+  pendingThreadResolutionCount?: number;
+  resolvedThreadCount?: number;
 }): string {
   const findingCount = input.result.findings.length;
   const fixedCount =
@@ -82,6 +84,16 @@ export function renderCompletedComment(input: {
       ? []
       : [
           `- ${fixedCount} existing ${fixedCount === 1 ? 'finding was' : 'findings were'} verified fixed`,
+        ]),
+    ...((input.resolvedThreadCount ?? 0) === 0
+      ? []
+      : [
+          `- ${input.resolvedThreadCount} fixed review ${input.resolvedThreadCount === 1 ? 'thread was' : 'threads were'} resolved`,
+        ]),
+    ...((input.pendingThreadResolutionCount ?? 0) === 0
+      ? []
+      : [
+          `- ${input.pendingThreadResolutionCount} fixed review ${input.pendingThreadResolutionCount === 1 ? 'thread is' : 'threads are'} pending resolution or require operator attention`,
         ]),
   ];
   const coverageLine =

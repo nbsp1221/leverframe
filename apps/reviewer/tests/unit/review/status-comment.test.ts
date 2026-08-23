@@ -97,6 +97,23 @@ describe('review status comments', () => {
     expect(comment).toContain('1 existing finding remains unresolved');
   });
 
+  it('reports resolved and degraded thread side effects separately', () => {
+    const comment = renderCompletedComment({
+      checkRunId: 123,
+      durationMilliseconds: 1_500,
+      job,
+      pendingThreadResolutionCount: 1,
+      resolvedThreadCount: 2,
+      result,
+      reviewBaseSha: 'aaaaaaa1111111111111111111111111111111111',
+      reviewId: undefined,
+      reviewMode: 'incremental',
+    });
+
+    expect(comment).toContain('2 fixed review threads were resolved');
+    expect(comment).toContain('1 fixed review thread is pending resolution');
+  });
+
   it('limits a failed status comment to the first error line', () => {
     const comment = renderFailedComment({
       checkRunId: 123,

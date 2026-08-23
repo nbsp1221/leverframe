@@ -29,6 +29,7 @@ const config = {
   uiBaseUrl: 'https://leverframe.retn0.dev',
   webhookUrl: 'https://example.test/webhooks/github',
   reasoningEffort: 'low' as const,
+  resolveFixedThreads: false,
   resourcesDirectory: '/unused',
 };
 const result = {
@@ -179,6 +180,21 @@ describe('versioned reviewer API contracts', () => {
       throw new Error('fixture finding is missing');
     }
     const fingerprint = findingFingerprint(firstFinding);
+    database.recordGitHubThreadAssociation({
+      commentNodeId: 'PRRC_comment',
+      fingerprint,
+      jobId: job.id,
+      pullRequestNumber: job.pullRequestNumber,
+      repository: job.repository,
+      reviewDatabaseId: '99',
+      threadNodeId: 'PRRT_thread',
+    });
+    const detailWithThread = reviewDetailSchema.parse(
+      await (await fetch(`${url}/api/v1/reviews/${job.id}`)).json(),
+    );
+    expect(detailWithThread.artifact.findings[0]?.thread_resolution).toMatchObject({
+      state: 'open',
+    });
     const context = contextResponseSchema.parse(
       await (await fetch(`${url}/api/v1/reviews/${job.id}/findings/${fingerprint}/context`)).json(),
     );

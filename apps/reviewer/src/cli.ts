@@ -77,6 +77,7 @@ function serve(): void {
     credentials,
     database,
     jobsDirectory: config.jobsDirectory,
+    resolveFixedThreads: config.resolveFixedThreads,
     reviewer: new SandboxReviewer({
       model: config.model,
       reasoningEffort: config.reasoningEffort,

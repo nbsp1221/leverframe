@@ -11,6 +11,11 @@ import {
   type ReviewVerdict,
 } from '../storage/evaluation-repository.js';
 import { redactFailureExcerpt } from '../storage/failure.js';
+import {
+  type FindingThreadStatus,
+  GitHubThreadRepository,
+  type PendingThreadResolution,
+} from '../storage/github-thread-repository.js';
 import { runMigrations, schemaVersion } from '../storage/migrations/index.js';
 import {
   type PreviousReview,
@@ -152,6 +157,7 @@ export interface ReviewDetailRow extends ReviewJob {
 export class JobDatabase {
   readonly #database: DatabaseSync;
   readonly #evaluationRepository: EvaluationRepository;
+  readonly #githubThreadRepository: GitHubThreadRepository;
   readonly #reviewRepository: ReviewRepository;
 
   constructor(path: string, options: { dataRoot?: string } = {}) {
@@ -161,6 +167,7 @@ export class JobDatabase {
     this.#database = openDatabase(path);
     runMigrations(this.#database);
     this.#reviewRepository = new ReviewRepository(this.#database, dataRoot);
+    this.#githubThreadRepository = new GitHubThreadRepository(this.#database);
     this.#evaluationRepository = new EvaluationRepository(this.#database, (jobId) =>
       this.getReviewArtifact(jobId),
     );
@@ -564,6 +571,52 @@ export class JobDatabase {
 
   getReviewFindings(repository: string, pullRequestNumber: number): ReviewFinding[] {
     return this.#reviewRepository.getReviewFindings(repository, pullRequestNumber);
+  }
+
+  recordGitHubThreadAssociation(input: {
+    commentNodeId: string;
+    fingerprint: string;
+    jobId: number;
+    pullRequestNumber: number;
+    repository: string;
+    reviewDatabaseId: string;
+    threadNodeId: string;
+  }): void {
+    this.#githubThreadRepository.recordAssociation(input);
+  }
+
+  queueFixedFindingResolutions(input: {
+    headSha: string;
+    jobId: number;
+    pullRequestNumber: number;
+    repository: string;
+    updates: NonNullable<ReviewResult['finding_updates']>;
+  }): number {
+    return this.#githubThreadRepository.queueFixedFindings(input);
+  }
+
+  nextPendingThreadResolution(jobId?: number): PendingThreadResolution | undefined {
+    return this.#githubThreadRepository.nextPendingResolution(jobId);
+  }
+
+  markThreadResolved(input: {
+    id: number;
+    resolutionCommentNodeId?: string;
+    resolvedAt?: string;
+  }): void {
+    this.#githubThreadRepository.markResolved(input);
+  }
+
+  retryThreadResolution(input: { id: number; error: string; delayMilliseconds: number }): void {
+    this.#githubThreadRepository.markRetry(input);
+  }
+
+  failThreadResolution(input: { id: number; error: string }): void {
+    this.#githubThreadRepository.markFailed(input);
+  }
+
+  getFindingThreadStatuses(repository: string, pullRequestNumber: number): FindingThreadStatus[] {
+    return this.#githubThreadRepository.listStatuses(repository, pullRequestNumber);
   }
 
   activatePullRequestJob(job: ReviewJob): PullRequestState {

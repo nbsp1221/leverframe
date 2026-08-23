@@ -59,6 +59,7 @@ const serverConfigSchema = z.object({
   uiBaseUrl: uiBaseUrlSchema,
   webhookUrl: webhookUrlSchema,
   reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
+  resolveFixedThreads: z.boolean(),
   resourcesDirectory: z.string().min(1),
 });
 
@@ -114,6 +115,7 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     uiBaseUrl: environment.APP_UI_BASE_URL,
     webhookUrl: environment.GITHUB_WEBHOOK_URL,
     reasoningEffort: environment.REVIEW_REASONING_EFFORT ?? 'high',
+    resolveFixedThreads: environment.REVIEW_RESOLVE_FIXED_THREADS === 'true',
     resourcesDirectory,
   });
 }

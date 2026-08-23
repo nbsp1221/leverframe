@@ -290,6 +290,82 @@ describe('JobDatabase', () => {
     database.close();
   });
 
+  it('associates published findings with GitHub threads and resolves explicit fixes', () => {
+    const database = new JobDatabase(':memory:');
+    database.enqueuePullRequest(baseJob);
+    const publicationJob = database.claimNextJob();
+    if (publicationJob === undefined) {
+      throw new Error('expected a publication job');
+    }
+    const fingerprint = '1234567890abcdef';
+    database.recordGitHubThreadAssociation({
+      commentNodeId: 'PRRC_comment',
+      fingerprint,
+      jobId: publicationJob.id,
+      pullRequestNumber: publicationJob.pullRequestNumber,
+      repository: publicationJob.repository,
+      reviewDatabaseId: '101',
+      threadNodeId: 'PRRT_thread',
+    });
+
+    database.updateJob({ id: publicationJob.id, state: 'DONE' });
+    database.enqueuePullRequest({
+      ...baseJob,
+      deliveryId: 'delivery-resolution',
+      headSha: 'b'.repeat(40),
+    });
+    const resolutionJob = database.claimNextJob();
+    if (resolutionJob === undefined) {
+      throw new Error('expected a resolution job');
+    }
+    expect(
+      database.queueFixedFindingResolutions({
+        headSha: resolutionJob.headSha,
+        jobId: resolutionJob.id,
+        pullRequestNumber: resolutionJob.pullRequestNumber,
+        repository: resolutionJob.repository,
+        updates: [
+          { evidence: 'The inverted comparison is now corrected.', fingerprint, status: 'fixed' },
+          { evidence: 'No matching thread.', fingerprint: '0'.repeat(16), status: 'fixed' },
+          { evidence: 'Still present.', fingerprint, status: 'still_present' },
+        ],
+      }),
+    ).toBe(1);
+
+    const pending = database.nextPendingThreadResolution();
+    expect(pending).toMatchObject({
+      attempt: 0,
+      evidence: 'The inverted comparison is now corrected.',
+      fingerprint,
+      headSha: resolutionJob.headSha,
+      installationId: resolutionJob.installationId,
+      jobId: resolutionJob.id,
+      threadNodeId: 'PRRT_thread',
+    });
+    if (pending === undefined) {
+      throw new Error('expected a pending thread resolution');
+    }
+
+    database.markThreadResolved({
+      id: pending.id,
+      resolutionCommentNodeId: 'PRRC_resolution',
+      resolvedAt: '2026-08-23T00:00:00.000Z',
+    });
+    expect(database.nextPendingThreadResolution()).toBeUndefined();
+    expect(
+      database.getFindingThreadStatuses(baseJob.repository, baseJob.pullRequestNumber),
+    ).toEqual([
+      {
+        fingerprint,
+        resolutionState: 'RESOLVED',
+        resolvedAt: '2026-08-23T00:00:00.000Z',
+        resolvedHeadSha: resolutionJob.headSha,
+        threadNodeId: 'PRRT_thread',
+      },
+    ]);
+    database.close();
+  });
+
   it('deduplicates and audits manual commands', () => {
     const database = new JobDatabase(':memory:');
     const command = {
