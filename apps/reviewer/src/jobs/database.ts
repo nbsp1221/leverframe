@@ -66,7 +66,7 @@ export interface CancellationResult {
 
 export interface ReviewJob extends PullRequestJobInput {
   /**
-   * Monotonically increasing claim/revival token used to reject stale worker
+   * Monotonically increasing claim/requeue token used to reject stale worker
    * updates. Jobs created before this column existed are assigned zero and
    * receive their first token when claimed.
    */
@@ -195,7 +195,7 @@ export class JobDatabase {
       VALUES (?, ?)
     `);
     const insertJob = this.#database.prepare(`
-      INSERT OR IGNORE INTO review_jobs (
+      INSERT INTO review_jobs (
         repository,
         pull_request_number,
         head_sha,
@@ -209,27 +209,15 @@ export class JobDatabase {
         schema_version, schema_hash
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const reviveJob = this.#database.prepare(`
-      UPDATE review_jobs
-      SET installation_id = ?, action = ?, delivery_id = ?, state = 'QUEUED',
-          attempt = attempt + 1,
-          error = NULL, check_run_id = NULL, result_path = NULL,
-          published_review_id = NULL,
-          base_sha = NULL, pull_request_title = NULL,
-          model = NULL, reasoning = NULL,
-          prompt_version = NULL, prompt_hash = NULL,
-          schema_version = NULL, schema_hash = NULL,
-          review_started_at = NULL, review_completed_at = NULL,
-          publication_started_at = NULL, published_at = NULL,
-          superseded_by_job_id = NULL,
-          error_code = NULL, error_excerpt = NULL, artifact_hash = NULL,
-          created_at = ?, updated_at = ?
+    const latestMatchingJob = this.#database.prepare(`
+      SELECT state
+      FROM review_jobs
       WHERE repository = ?
         AND pull_request_number = ?
         AND head_sha = ?
         AND policy_version = ?
-        AND state IN ('CANCELLED', 'SUPERSEDED')
-      RETURNING id
+      ORDER BY id DESC
+      LIMIT 1
     `);
     const supersedeOlderQueuedJobs = this.#database.prepare(`
       UPDATE review_jobs
@@ -248,43 +236,35 @@ export class JobDatabase {
         return { deliveryAccepted: false, jobCreated: false, jobsSuperseded: 0 };
       }
 
-      const insertedJob = insertJob.run(
+      const latest = latestMatchingJob.get(
         input.repository,
         input.pullRequestNumber,
         input.headSha,
         input.policyVersion,
-        input.installationId,
-        input.action,
-        input.deliveryId,
-        now,
-        now,
-        input.baseSha ?? null,
-        input.pullRequestTitle ?? null,
-        input.model ?? null,
-        input.reasoning ?? null,
-        input.promptVersion ?? null,
-        input.promptHash ?? null,
-        input.schemaVersion ?? null,
-        input.schemaHash ?? null,
-      );
-      const revivedJob =
-        insertedJob.changes === 0
-          ? (reviveJob.get(
-              input.installationId,
-              input.action,
-              input.deliveryId,
-              now,
-              now,
-              input.repository,
-              input.pullRequestNumber,
-              input.headSha,
-              input.policyVersion,
-            ) as { id: number } | undefined)
-          : undefined;
-      if (revivedJob !== undefined) {
-        this.#database.prepare('DELETE FROM review_artifacts WHERE job_id = ?').run(revivedJob.id);
+      ) as { state: string } | undefined;
+      const jobCreated =
+        latest === undefined || latest.state === 'CANCELLED' || latest.state === 'SUPERSEDED';
+      if (jobCreated) {
+        insertJob.run(
+          input.repository,
+          input.pullRequestNumber,
+          input.headSha,
+          input.policyVersion,
+          input.installationId,
+          input.action,
+          input.deliveryId,
+          now,
+          now,
+          input.baseSha ?? null,
+          input.pullRequestTitle ?? null,
+          input.model ?? null,
+          input.reasoning ?? null,
+          input.promptVersion ?? null,
+          input.promptHash ?? null,
+          input.schemaVersion ?? null,
+          input.schemaHash ?? null,
+        );
       }
-      const jobCreated = insertedJob.changes === 1 || revivedJob !== undefined;
       const superseded = jobCreated
         ? supersedeOlderQueuedJobs.run(
             now,
@@ -327,7 +307,7 @@ export class JobDatabase {
       const cancelled = this.#database
         .prepare(`
           UPDATE review_jobs
-          SET state = 'CANCELLED', error = ?, updated_at = ?
+          SET state = 'CANCELLED', attempt = attempt + 1, error = ?, updated_at = ?
           WHERE repository = ?
             AND pull_request_number = ?
             AND state IN (

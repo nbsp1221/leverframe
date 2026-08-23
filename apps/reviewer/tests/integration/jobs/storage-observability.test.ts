@@ -6,6 +6,7 @@ import type { ReviewResult } from '../../../src/review/result.js';
 import { EvaluationConflictError, JobDatabase } from '../../../src/jobs/database.js';
 import { selectReviewContext } from '../../../src/review/history.js';
 import { FAILURE_EXCERPT_MAX_BYTES, redactFailureExcerpt } from '../../../src/storage/failure.js';
+import { migrations } from '../../../src/storage/migrations/index.js';
 
 const input = {
   action: 'opened',
@@ -35,7 +36,7 @@ const result: ReviewResult = {
 };
 
 describe('review observability storage', () => {
-  it('clears attempt facts and artifacts when reviving a cancelled job', () => {
+  it('preserves cancelled execution facts when creating a replacement execution', () => {
     const database = new JobDatabase(':memory:');
     database.enqueuePullRequest(input);
     const job = database.claimNextJob();
@@ -91,19 +92,30 @@ describe('review observability storage', () => {
         deliveryId: 'revived',
       }),
     ).toMatchObject({ jobCreated: true });
-    expect(database.getReviewArtifact(job.id)).toBeUndefined();
-    const revived = database.getReviewJob(job.id);
-    expect(revived).toMatchObject({
-      action: 'ready_for_review',
-      state: 'QUEUED',
+    expect(database.getReviewArtifact(job.id)?.available).toBe(true);
+    const cancelled = database.getReviewJob(job.id);
+    expect(cancelled).toMatchObject({
+      action: 'opened',
+      state: 'CANCELLED',
     });
-    expect(revived?.artifactHash).toBeUndefined();
-    expect(revived?.checkRunId).toBeUndefined();
-    expect(revived?.model).toBeUndefined();
-    expect(revived?.pullRequestTitle).toBeUndefined();
-    expect(revived?.reviewCompletedAt).toBeUndefined();
-    expect(revived?.reviewStartedAt).toBeUndefined();
-    expect(revived?.resultPath).toBeUndefined();
+    expect(cancelled?.artifactHash).toBeDefined();
+    expect(cancelled?.checkRunId).toBe(10);
+    expect(cancelled?.model).toBe('old-model');
+    expect(cancelled?.pullRequestTitle).toBe('Old title');
+    expect(cancelled?.resultPath).toBe('/old/result.json');
+
+    const replacement = database.claimNextJob();
+    if (replacement === undefined) {
+      throw new Error('expected a replacement execution');
+    }
+    expect(replacement.id).toBeGreaterThan(job.id);
+    expect(database.getReviewArtifact(replacement.id)).toBeUndefined();
+    expect(replacement).toMatchObject({ action: 'ready_for_review', state: 'CHECKING_OUT' });
+    expect(replacement.artifactHash).toBeUndefined();
+    expect(replacement.checkRunId).toBeUndefined();
+    expect(replacement.model).toBeUndefined();
+    expect(replacement.pullRequestTitle).toBeUndefined();
+    expect(replacement.resultPath).toBeUndefined();
     database.close();
   });
 
@@ -111,16 +123,52 @@ describe('review observability storage', () => {
     const root = mkdtempSync('/tmp/leverframe-migration-');
     try {
       const path = join(root, 'legacy.sqlite');
-      const initial = new JobDatabase(path, { dataRoot: root });
-      initial.enqueuePullRequest(input);
-      initial.close();
       const legacy = new DatabaseSync(path);
-      legacy.exec('DELETE FROM schema_migrations');
+      legacy.exec(
+        'PRAGMA foreign_keys = ON; CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)',
+      );
+      for (const migration of migrations.slice(0, 5)) {
+        legacy.exec('BEGIN IMMEDIATE');
+        migration.apply(legacy);
+        legacy
+          .prepare('INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)')
+          .run(migration.version, migration.name, new Date().toISOString());
+        legacy.exec('COMMIT');
+      }
+      legacy.exec(
+        `INSERT INTO webhook_deliveries(delivery_id,received_at) VALUES('d1','2026-08-24T00:00:00.000Z')`,
+      );
+      legacy
+        .prepare(
+          `INSERT INTO review_jobs(repository,pull_request_number,head_sha,policy_version,installation_id,action,delivery_id,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'CANCELLED',?,?)`,
+        )
+        .run('o/r', 1, 'a'.repeat(40), 'v1', 1, 'opened', 'd1', 'now', 'now');
       legacy.close();
       const migrated = new JobDatabase(path, { dataRoot: root });
-      expect(migrated.getSchemaVersion()).toBe(5);
+      expect(migrated.getSchemaVersion()).toBe(6);
       expect(migrated.countJobs()).toBe(1);
+      expect(migrated.enqueuePullRequest({ ...input, deliveryId: 'd2' })).toMatchObject({
+        jobCreated: true,
+      });
+      expect(migrated.countJobs()).toBe(2);
       migrated.close();
+      const verified = new DatabaseSync(path);
+      expect(verified.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      const identityIndexes = verified.prepare('PRAGMA index_list(review_jobs)').all() as Array<{
+        unique: number;
+      }>;
+      expect(identityIndexes.some((index) => index.unique === 1)).toBe(false);
+      verified.close();
+
+      const missingLedgerPath = join(root, 'missing-ledger.sqlite');
+      const current = new JobDatabase(missingLedgerPath, { dataRoot: root });
+      current.close();
+      const missingLedger = new DatabaseSync(missingLedgerPath);
+      missingLedger.exec('DELETE FROM schema_migrations');
+      missingLedger.close();
+      expect(() => new JobDatabase(missingLedgerPath, { dataRoot: root })).toThrow(
+        /identity unique constraint is missing/,
+      );
 
       const incompatiblePath = join(root, 'incompatible.sqlite');
       const incompatible = new DatabaseSync(incompatiblePath);

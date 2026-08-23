@@ -4,6 +4,7 @@ export interface Migration {
   version: number;
   name: string;
   apply: (database: DatabaseSync) => void;
+  requiresForeignKeysDisabled?: boolean;
 }
 
 const baselineTables = `
@@ -47,7 +48,7 @@ function columns(database: DatabaseSync, table: string): Set<string> {
   );
 }
 
-function assertBaselineConstraints(database: DatabaseSync): void {
+function assertBaselineConstraints(database: DatabaseSync, requireIdentityUnique: boolean): void {
   const tableInfo = (table: string) =>
     database.prepare(`PRAGMA table_info(${table})`).all() as Array<{
       name: string;
@@ -116,8 +117,11 @@ function assertBaselineConstraints(database: DatabaseSync): void {
         .map((column) => column.name)
         .join('\0') === 'repository\0pull_request_number\0head_sha\0policy_version',
   );
-  if (!hasIdentityUnique) {
+  if (requireIdentityUnique && !hasIdentityUnique) {
     throw new Error('review_jobs identity unique constraint is missing');
+  }
+  if (!requireIdentityUnique && hasIdentityUnique) {
+    throw new Error('review_jobs still reuses logical review identities');
   }
 
   const foreignKeys = (table: string) =>
@@ -212,7 +216,7 @@ export const migrations: readonly Migration[] = [
     apply: (database) => {
       database.exec(baselineTables);
       assertBaselineCompatibility(database);
-      assertBaselineConstraints(database);
+      assertBaselineConstraints(database, true);
     },
   },
   {
@@ -333,6 +337,46 @@ export const migrations: readonly Migration[] = [
         ON github_thread_association_intents(state, next_attempt_at, job_id);
     `),
   },
+  {
+    version: 6,
+    name: 'immutable-review-job-executions',
+    requiresForeignKeysDisabled: true,
+    apply: (database) =>
+      database.exec(`
+      CREATE TABLE review_jobs_v6 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        repository TEXT NOT NULL, pull_request_number INTEGER NOT NULL,
+        head_sha TEXT NOT NULL, policy_version TEXT NOT NULL, installation_id INTEGER NOT NULL,
+        action TEXT NOT NULL, delivery_id TEXT NOT NULL REFERENCES webhook_deliveries(delivery_id),
+        state TEXT NOT NULL DEFAULT 'QUEUED', attempt INTEGER NOT NULL DEFAULT 0, error TEXT,
+        check_run_id INTEGER, result_path TEXT, published_review_id INTEGER,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        base_sha TEXT, pull_request_title TEXT, model TEXT, reasoning TEXT,
+        prompt_version TEXT, prompt_hash TEXT, schema_version TEXT, schema_hash TEXT,
+        review_started_at TEXT, review_completed_at TEXT, publication_started_at TEXT,
+        published_at TEXT, superseded_by_job_id INTEGER, error_code TEXT,
+        error_excerpt TEXT, artifact_hash TEXT
+      );
+      INSERT INTO review_jobs_v6 (
+        id, repository, pull_request_number, head_sha, policy_version, installation_id,
+        action, delivery_id, state, attempt, error, check_run_id, result_path,
+        published_review_id, created_at, updated_at, base_sha, pull_request_title,
+        model, reasoning, prompt_version, prompt_hash, schema_version, schema_hash,
+        review_started_at, review_completed_at, publication_started_at, published_at,
+        superseded_by_job_id, error_code, error_excerpt, artifact_hash
+      )
+      SELECT
+        id, repository, pull_request_number, head_sha, policy_version, installation_id,
+        action, delivery_id, state, attempt, error, check_run_id, result_path,
+        published_review_id, created_at, updated_at, base_sha, pull_request_title,
+        model, reasoning, prompt_version, prompt_hash, schema_version, schema_hash,
+        review_started_at, review_completed_at, publication_started_at, published_at,
+        superseded_by_job_id, error_code, error_excerpt, artifact_hash
+      FROM review_jobs;
+      DROP TABLE review_jobs;
+      ALTER TABLE review_jobs_v6 RENAME TO review_jobs;
+    `),
+  },
 ];
 
 export function runMigrations(database: DatabaseSync): number {
@@ -366,21 +410,38 @@ export function runMigrations(database: DatabaseSync): number {
     if (migration.version !== latest + 1) {
       throw new Error(`schema migration gap before version ${migration.version}`);
     }
+    if (migration.requiresForeignKeysDisabled === true) {
+      database.exec('PRAGMA foreign_keys = OFF');
+    }
     database.exec('BEGIN IMMEDIATE');
     try {
       migration.apply(database);
+      if (migration.requiresForeignKeysDisabled === true) {
+        const violations = database.prepare('PRAGMA foreign_key_check').all();
+        if (violations.length > 0) {
+          throw new Error(`schema migration ${migration.version} created foreign key violations`);
+        }
+      }
       database
         .prepare('INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)')
         .run(migration.version, migration.name, new Date().toISOString());
       database.exec('COMMIT');
+      if (migration.requiresForeignKeysDisabled === true) {
+        database.exec('PRAGMA foreign_keys = ON');
+      }
       latest = migration.version;
     } catch (error) {
-      database.exec('ROLLBACK');
+      if (database.isTransaction) {
+        database.exec('ROLLBACK');
+      }
+      if (migration.requiresForeignKeysDisabled === true) {
+        database.exec('PRAGMA foreign_keys = ON');
+      }
       throw error;
     }
   }
   assertBaselineCompatibility(database);
-  assertBaselineConstraints(database);
+  assertBaselineConstraints(database, false);
   const finalVersion = schemaVersion(database);
   if (finalVersion !== migrations.length) {
     throw new Error(`schema migration incomplete at version ${finalVersion}`);
