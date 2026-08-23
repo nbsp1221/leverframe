@@ -694,14 +694,31 @@ export class ReviewWorker {
     statusCommentId: number | undefined;
   }): Promise<void> {
     const attempt = input.job.attempt ?? 0;
+    let cancellation = input.cancellation;
     const updated = this.options.database.updateJob({
       attempt,
       expectedStates: ['CHECKING_OUT', 'SANDBOX_CREATING', 'REVIEWING', 'VALIDATING', 'PUBLISHING'],
       id: input.job.id,
-      state: input.cancellation.state,
+      state: cancellation.state,
     });
-    if (!updated && !this.options.database.isJobAttemptCurrent({ attempt, jobId: input.job.id })) {
-      return;
+    if (!updated) {
+      if (!this.options.database.isJobAttemptCurrent({ attempt, jobId: input.job.id })) {
+        return;
+      }
+      const persistedState = this.options.database.getReviewJob(input.job.id)?.state;
+      if (persistedState === 'CANCELLED' && cancellation.state !== persistedState) {
+        cancellation = {
+          reason: 'The pull request was closed or converted to draft.',
+          state: persistedState,
+        };
+      } else if (persistedState === 'SUPERSEDED' && cancellation.state !== persistedState) {
+        cancellation = {
+          reason: 'A newer pull request commit replaced this review run.',
+          state: persistedState,
+        };
+      } else if (persistedState !== cancellation.state) {
+        return;
+      }
     }
     if (updated) {
       this.#removeEvents(input.job);
@@ -711,19 +728,17 @@ export class ReviewWorker {
       conclusion: 'cancelled',
       installationId: input.job.installationId,
       output: {
-        summary: input.cancellation.reason,
+        summary: cancellation.reason,
         title:
-          input.cancellation.state === 'SUPERSEDED'
-            ? 'Code review superseded'
-            : 'Code review cancelled',
+          cancellation.state === 'SUPERSEDED' ? 'Code review superseded' : 'Code review cancelled',
       },
       repository: input.job.repository,
     });
     await this.#writeStatusComment({
       body:
-        input.cancellation.state === 'SUPERSEDED'
+        cancellation.state === 'SUPERSEDED'
           ? renderSupersededComment(input.job, input.checkRunId)
-          : renderCancelledComment(input.job, input.checkRunId, input.cancellation.reason),
+          : renderCancelledComment(input.job, input.checkRunId, cancellation.reason),
       github: input.github,
       job: input.job,
       statusCommentId: input.statusCommentId,
