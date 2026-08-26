@@ -23,6 +23,7 @@ const config: ServerConfig = {
   webhookUrl: 'https://leverframe-api.retn0.dev/webhooks/github',
   reasoningEffort: 'low',
   resourcesDirectory: '/unused/resources',
+  sandboxTemplate: `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
 };
 
 const resources: Array<() => void> = [];

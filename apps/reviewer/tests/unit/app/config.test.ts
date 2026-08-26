@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadServerConfig } from '../../../src/app/config.js';
 
+const sandboxTemplate = `ghcr.io/example/template@sha256:${'a'.repeat(64)}`;
+
 describe('server configuration', () => {
   it('derives cohesive state paths from one data directory', () => {
     expect(
@@ -16,6 +18,7 @@ describe('server configuration', () => {
         GITHUB_APP_NAME: 'example-leverframe-app',
         REVIEW_MODEL: 'review-model',
         REVIEW_REASONING_EFFORT: 'medium',
+        REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
       }),
     ).toMatchObject({
       allowedOwnerId: 42,
@@ -29,6 +32,7 @@ describe('server configuration', () => {
       webhookUrl: 'https://github.example.com/webhooks/github',
       reasoningEffort: 'medium',
       resourcesDirectory: join(process.cwd(), 'resources'),
+      sandboxTemplate,
     });
   });
 
@@ -39,6 +43,7 @@ describe('server configuration', () => {
         GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
         GITHUB_ALLOWED_OWNER_ID: '42',
         GITHUB_APP_NAME: 'example-leverframe-app',
+        REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
       }).resourcesDirectory,
     ).toBe(join(process.cwd(), 'resources'));
   });
@@ -57,6 +62,7 @@ describe('server configuration', () => {
           APP_RESOURCES_DIRECTORY: resourcesDirectory,
           GITHUB_ALLOWED_OWNER_ID: '42',
           GITHUB_APP_NAME: 'example-leverframe-app',
+          REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
         }).resourcesDirectory,
       ).toBe(resourcesDirectory);
     } finally {
@@ -90,6 +96,7 @@ describe('server configuration', () => {
         GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
         GITHUB_ALLOWED_OWNER_ID: '42',
         GITHUB_APP_NAME: 'example-leverframe-app',
+        REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
       }),
     ).toMatchObject({
       model: 'gpt-5.6-sol',
@@ -107,6 +114,34 @@ describe('server configuration', () => {
         REVIEW_REASONING_EFFORT: 'automatic',
       }),
     ).toThrow();
+  });
+
+  it('requires an immutable sandbox template instead of falling back to a tag', () => {
+    const environment = {
+      APP_UI_BASE_URL: 'https://leverframe.example.com',
+      GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
+      GITHUB_ALLOWED_OWNER_ID: '42',
+      GITHUB_APP_NAME: 'example-leverframe-app',
+    };
+    expect(() => loadServerConfig(environment)).toThrow(/sandboxTemplate/);
+    expect(() =>
+      loadServerConfig({
+        ...environment,
+        REVIEW_SANDBOX_TEMPLATE: 'ghcr.io/example/template:latest',
+      }),
+    ).toThrow(/sha256/);
+    for (const malformedReference of [
+      `ghcr.io/example//template@sha256:${'a'.repeat(64)}`,
+      `ghcr.io/example/template/@sha256:${'a'.repeat(64)}`,
+      `ghcr.io/_example/template@sha256:${'a'.repeat(64)}`,
+    ]) {
+      expect(() =>
+        loadServerConfig({
+          ...environment,
+          REVIEW_SANDBOX_TEMPLATE: malformedReference,
+        }),
+      ).toThrow(/sha256/);
+    }
   });
 
   it('requires an explicit GitHub owner account', () => {

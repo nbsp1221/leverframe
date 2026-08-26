@@ -47,6 +47,13 @@ const webhookUrlSchema = z.string().superRefine((value, context) => {
   }
 });
 
+const sandboxTemplateSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9.-]+(?::[0-9]+)?\/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*@sha256:[0-9a-f]{64}$/,
+    'must be a fully qualified OCI image reference pinned by sha256 digest',
+  );
+
 const serverConfigSchema = z.object({
   allowedOwnerId: z.number().int().positive(),
   credentialsDirectory: z.string().min(1),
@@ -60,6 +67,7 @@ const serverConfigSchema = z.object({
   webhookUrl: webhookUrlSchema,
   reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
   resourcesDirectory: z.string().min(1),
+  sandboxTemplate: sandboxTemplateSchema,
 });
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
@@ -115,5 +123,6 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     webhookUrl: environment.GITHUB_WEBHOOK_URL,
     reasoningEffort: environment.REVIEW_REASONING_EFFORT ?? 'high',
     resourcesDirectory,
+    sandboxTemplate: environment.REVIEW_SANDBOX_TEMPLATE,
   });
 }

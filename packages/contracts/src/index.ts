@@ -81,6 +81,7 @@ export const reviewExecutionStageSchema = z.enum([
 
 export const reviewExecutionEventTypeSchema = z.enum([
   'attempt_started',
+  'sandbox_environment',
   'process_heartbeat',
   'thread_started',
   'turn_started',

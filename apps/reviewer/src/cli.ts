@@ -12,7 +12,7 @@ import { ThreadSideEffectWorker } from './jobs/thread-side-effect-worker.js';
 import { ReviewWorker } from './jobs/worker.js';
 import { recoverOrphanSandboxes } from './sandbox/recovery.js';
 import { SandboxReviewer } from './sandbox/reviewer.js';
-import { runProcess } from './system/process.js';
+import { preflightSandboxRuntime, sandboxRuntimeAvailable } from './sandbox/runtime.js';
 
 interface PackageMetadata {
   version: string;
@@ -84,6 +84,7 @@ function serve(): void {
       model: config.model,
       reasoningEffort: config.reasoningEffort,
       resourcesDirectory: config.resourcesDirectory,
+      sandboxTemplate: config.sandboxTemplate,
       traceStore,
     }),
   });
@@ -94,7 +95,7 @@ function serve(): void {
     database,
     credentials,
     {
-      isSandboxAvailable: sandboxDaemonAvailable,
+      isSandboxAvailable: () => sandboxRuntimeAvailable(config.sandboxTemplate),
       isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,
       onJobQueued: (job) => worker.cancelSuperseded(job),
       onManualCommand: (command) => commandHandler.handle(command),
@@ -144,11 +145,12 @@ function serve(): void {
 
   server.listen(config.port, config.host, () => {
     console.log(`Leverframe listening on http://${config.host}:${config.port}`);
-    void startWorkersAfterRecovery(database, worker, threadWorker);
+    void startWorkersAfterRecovery(config.sandboxTemplate, database, worker, threadWorker);
   });
 }
 
 async function startWorkersAfterRecovery(
+  sandboxTemplate: string,
   database: JobDatabase,
   worker: ReviewWorker,
   threadWorker: ThreadSideEffectWorker,
@@ -161,16 +163,13 @@ async function startWorkersAfterRecovery(
   } catch (error) {
     console.warn('orphan review sandbox recovery failed; continuing startup', error);
   }
-  worker.start();
   threadWorker.start();
-}
-
-async function sandboxDaemonAvailable(): Promise<boolean> {
   try {
-    await runProcess('sbx', ['daemon', 'status'], { timeoutMilliseconds: 5_000 });
-    return true;
-  } catch {
-    return false;
+    const evidence = await preflightSandboxRuntime(sandboxTemplate);
+    console.log(`sandbox preflight passed\n${evidence}`);
+    worker.start();
+  } catch (error) {
+    console.error('sandbox preflight failed; review worker was not started', error);
   }
 }
 

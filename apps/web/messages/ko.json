@@ -166,6 +166,7 @@
     "emptyOutput": "출력 없음",
     "exitCode": "종료 코드",
     "traceEvent_agent_message": "Codex 메시지",
+    "traceEvent_sandbox_environment": "샌드박스 환경",
     "traceEvent_file_change": "파일 변경 활동",
     "traceEvent_tool_activity": "도구 활동",
     "traceEvent_turn_failed": "Codex 실행 실패",

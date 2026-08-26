@@ -32,6 +32,7 @@ const config = {
   webhookUrl: 'https://example.test/webhooks/github',
   reasoningEffort: 'low' as const,
   resourcesDirectory: '/unused',
+  sandboxTemplate: `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
 };
 const result = {
   coverage: {
