@@ -13,6 +13,9 @@ test-results/
 .internal/
 var/
 
+# Internal planning documents belong under .internal/
+/docs/plans/
+
 # Local deployment overrides
 compose.override.yaml
 
