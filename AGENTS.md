@@ -8,14 +8,6 @@
 - Never add width-based line breaks to GitHub issue, pull request, review, or comment bodies because GitHub renders them as visible line breaks.
 - The deliberate sentence-per-line formatting in `resources/review-prompt.md` is an exception to the one-line paragraph rule; do not introduce width-based hard wraps elsewhere.
 
-## Change workflow
-
-- Create and continuously synchronize a Multica issue for planned feature work.
-- Start a work branch from an up-to-date `main`, then obtain plan approval before implementation.
-- On a work branch with no pull request, commits created through the `commit` skill and pushes are pre-authorized.
-- Creating a pull request requires explicit user approval. After a pull request exists, every additional push also requires explicit user approval.
-- Keep the Multica status and high-signal metadata aligned with the actual work state without waiting for a separate user request.
-
 ## Live GitHub testing
 
 - Use only the private repository `nbsp1221/skillpin-private-e2e-20260718` and its existing Pull Request `#1` for live webhook, review, Check Run, comment, cancellation, or supersession tests.
