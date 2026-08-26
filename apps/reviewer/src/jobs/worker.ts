@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CredentialStore } from '../github/credentials.js';
 import type { ReviewableLines } from '../review/diff-lines.js';
@@ -161,7 +161,7 @@ export class ReviewWorker {
         // must not terminate supervision for later jobs.
         const message = error instanceof Error ? error.message : String(error);
         console.error(`review job ${job.id} supervision failure: ${message}`);
-        const terminalized = this.options.database.updateJob({
+        this.options.database.updateJob({
           attempt: job.attempt ?? 0,
           errorCode: isTimeoutError(error) ? 'TIMEOUT' : 'SUPERVISION_FAILED',
           error: message.slice(0, 4_000),
@@ -175,9 +175,6 @@ export class ReviewWorker {
           id: job.id,
           state: isTimeoutError(error) ? 'TIMED_OUT' : 'FAILED',
         });
-        if (terminalized) {
-          this.#removeEvents(job);
-        }
       }
     }
   }
@@ -306,6 +303,7 @@ export class ReviewWorker {
       }
       phase = 'REVIEWING';
       const review = await this.options.reviewer.review({
+        attempt: job.attempt ?? 0,
         baseRef: pullRequest.baseRef,
         baseSha: pullRequest.baseSha,
         cloneUrl: pullRequest.cloneUrl,
@@ -440,7 +438,6 @@ export class ReviewWorker {
       if (!completed) {
         throw new Error('review job could not enter DONE');
       }
-      this.#removeEvents(job);
       logCompletion(job, reviewId);
     } catch (error) {
       await this.#handleProcessFailure({
@@ -494,7 +491,7 @@ export class ReviewWorker {
           statusCommentId: input.statusCommentId,
         });
       } else {
-        const cancelled = this.options.database.updateJob({
+        this.options.database.updateJob({
           attempt: input.job.attempt ?? 0,
           expectedStates: [
             'CHECKING_OUT',
@@ -506,9 +503,6 @@ export class ReviewWorker {
           id: input.job.id,
           state: cancellation.state,
         });
-        if (cancelled) {
-          this.#removeEvents(input.job);
-        }
       }
       return;
     }
@@ -529,7 +523,7 @@ export class ReviewWorker {
 
     console.error(`review job ${input.job.id} failed: ${message}`);
     const timedOut = isTimeoutError(input.error);
-    const failed = this.options.database.updateJob({
+    this.options.database.updateJob({
       attempt: input.job.attempt ?? 0,
       errorCode: timedOut ? 'TIMEOUT' : 'REVIEW_FAILED',
       error: message.slice(0, 4_000),
@@ -537,9 +531,6 @@ export class ReviewWorker {
       id: input.job.id,
       state: timedOut ? 'TIMED_OUT' : 'FAILED',
     });
-    if (failed) {
-      this.#removeEvents(input.job);
-    }
     if (input.github !== undefined && input.checkRunId !== undefined) {
       try {
         await input.github.completeCheckRun({
@@ -718,9 +709,6 @@ export class ReviewWorker {
         state: persisted.state,
       };
     }
-    if (updated) {
-      this.#removeEvents(input.job);
-    }
     await input.github.completeCheckRun({
       checkRunId: input.checkRunId,
       conclusion: 'cancelled',
@@ -741,10 +729,6 @@ export class ReviewWorker {
       job: input.job,
       statusCommentId: input.statusCommentId,
     });
-  }
-
-  #removeEvents(job: ReviewJob): void {
-    rmSync(join(this.options.jobsDirectory, String(job.id), 'codex-events.jsonl'), { force: true });
   }
 
   async #writeStatusComment(input: {

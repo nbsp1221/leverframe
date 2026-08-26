@@ -21,6 +21,7 @@ import { Link } from '../../i18n/navigation';
 import { CopyShaButton } from './copy-sha';
 import { FindingContext } from './finding-context';
 import { ReviewEvaluationPanel } from './review-evaluation';
+import { ReviewExecutionTrace } from './review-execution-trace';
 import { RelativeTime } from './review-list-columns';
 
 export async function ReviewDetailPage({
@@ -80,6 +81,7 @@ export async function ReviewDetailPage({
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-6">
           <ExecutionMetadata detail={detail} t={t} />
+          <ReviewExecutionTrace reviewId={detail.id} />
           <Card>
             <CardHeader>
               <CardTitle>{t('summary')}</CardTitle>

@@ -1,5 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ExecutionTraceStore } from '../execution/trace.js';
+import { CodexExecutionRecorder } from '../execution/codex-events.js';
 import { reviewProtocol, reviewerSandboxName } from '../identity.js';
 import { type ReviewableLines, parseReviewableLines } from '../review/diff-lines.js';
 import {
@@ -9,7 +11,7 @@ import {
   reviewResultSchema,
   validateFindingUpdates,
 } from '../review/result.js';
-import { runProcess } from '../system/process.js';
+import { runProcess, runStreamingProcess } from '../system/process.js';
 
 interface SandboxReview {
   path: string;
@@ -24,6 +26,7 @@ export class SandboxReviewer {
       model: string;
       reasoningEffort: string;
       resourcesDirectory: string;
+      traceStore: ExecutionTraceStore;
     },
   ) {}
 
@@ -33,6 +36,7 @@ export class SandboxReviewer {
     cloneUrl: string;
     headSha: string;
     installationToken: string;
+    attempt: number;
     jobDirectory: string;
     jobId: number;
     policyInstructions?: readonly string[];
@@ -177,39 +181,47 @@ export class SandboxReviewer {
         schema: readFileSync(join(this.options.resourcesDirectory, 'review-schema.json'), 'utf8'),
       });
 
-      const codex = await runProcess(
-        'sbx',
-        [
-          'exec',
-          '-i',
-          '-w',
-          reviewProtocol.sandboxWorkspace,
-          sandboxName,
-          'codex',
-          'exec',
-          '--model',
-          this.options.model,
-          '--config',
-          `model_reasoning_effort="${this.options.reasoningEffort}"`,
-          '--dangerously-bypass-approvals-and-sandbox',
-          '--ephemeral',
-          '--ignore-rules',
-          '--output-schema',
-          schemaPath,
-          '--output-last-message',
-          sandboxOutputPath,
-          '--json',
-          '-',
-        ],
-        {
-          input: prompt,
-          signal: input.signal,
-          timeoutMilliseconds: 30 * 60 * 1000,
-        },
+      const recorder = new CodexExecutionRecorder(
+        this.options.traceStore,
+        input.jobId,
+        input.attempt,
       );
-      writeFileSync(join(input.jobDirectory, 'codex-events.jsonl'), codex.stdout, {
-        mode: 0o600,
-      });
+      recorder.start();
+      try {
+        await runStreamingProcess(
+          'sbx',
+          [
+            'exec',
+            '-i',
+            '-w',
+            reviewProtocol.sandboxWorkspace,
+            sandboxName,
+            'codex',
+            'exec',
+            '--model',
+            this.options.model,
+            '--config',
+            `model_reasoning_effort="${this.options.reasoningEffort}"`,
+            '--dangerously-bypass-approvals-and-sandbox',
+            '--ephemeral',
+            '--ignore-rules',
+            '--output-schema',
+            schemaPath,
+            '--output-last-message',
+            sandboxOutputPath,
+            '--json',
+            '-',
+          ],
+          {
+            input: prompt,
+            onStdout: (chunk) => recorder.write(chunk),
+            signal: input.signal,
+            timeoutMilliseconds: 30 * 60 * 1000,
+          },
+        );
+      } finally {
+        recorder.stop();
+      }
 
       const output = await runProcess('sbx', ['exec', sandboxName, 'cat', sandboxOutputPath], {
         signal: input.signal,

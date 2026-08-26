@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { type CAC, cac } from 'cac';
 import { loadServerConfig } from './app/config.js';
 import { createLeverframeServer } from './app/server.js';
+import { ExecutionTraceStore } from './execution/trace.js';
 import { GitHubAppClient } from './github/client.js';
 import { CredentialStore } from './github/credentials.js';
 import { ManualCommandHandler } from './jobs/command-handler.js';
@@ -73,6 +74,7 @@ function serve(): void {
   const database = new JobDatabase(config.databasePath, {
     dataRoot: config.jobsDirectory.replace(/[/\\]jobs$/, ''),
   });
+  const traceStore = new ExecutionTraceStore(config.jobsDirectory);
   const worker = new ReviewWorker({
     allowedOwnerId: config.allowedOwnerId,
     credentials,
@@ -82,18 +84,26 @@ function serve(): void {
       model: config.model,
       reasoningEffort: config.reasoningEffort,
       resourcesDirectory: config.resourcesDirectory,
+      traceStore,
     }),
   });
   const threadWorker = new ThreadSideEffectWorker({ credentials, database });
   const commandHandler = new ManualCommandHandler({ credentials, database, worker });
-  const server = createLeverframeServer(config, database, credentials, {
-    isSandboxAvailable: sandboxDaemonAvailable,
-    isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,
-    onJobQueued: (job) => worker.cancelSuperseded(job),
-    onManualCommand: (command) => commandHandler.handle(command),
-    onPullRequestCancelled: (cancellation) => worker.cancelPullRequest(cancellation),
-    getFindingContext: (input) => new GitHubAppClient(credentials.read()).getFindingContext(input),
-  });
+  const server = createLeverframeServer(
+    config,
+    database,
+    credentials,
+    {
+      isSandboxAvailable: sandboxDaemonAvailable,
+      isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,
+      onJobQueued: (job) => worker.cancelSuperseded(job),
+      onManualCommand: (command) => commandHandler.handle(command),
+      onPullRequestCancelled: (cancellation) => worker.cancelPullRequest(cancellation),
+      getFindingContext: (input) =>
+        new GitHubAppClient(credentials.read()).getFindingContext(input),
+    },
+    traceStore,
+  );
 
   let shuttingDown = false;
 
