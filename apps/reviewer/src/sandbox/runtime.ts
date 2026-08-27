@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { runProcess } from '../system/process.js';
 
@@ -56,6 +56,7 @@ export async function preflightSandboxRuntime(
   hostVisibleWorkspaceRoot: string,
 ): Promise<string> {
   const identity = await inspectSandboxRuntime(template);
+  mkdirSync(hostVisibleWorkspaceRoot, { recursive: true, mode: 0o700 });
   const workspace = mkdtempSync(join(hostVisibleWorkspaceRoot, '.sandbox-preflight-'));
   const name = `leverframe-preflight-${randomUUID().slice(0, 12)}`;
   let created = false;

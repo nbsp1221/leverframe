@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,14 +13,16 @@ const template = `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`;
 
 describe('sandbox runtime preflight', () => {
   let hostVisibleWorkspaceRoot: string;
+  let testDirectory: string;
 
   beforeEach(() => {
-    hostVisibleWorkspaceRoot = mkdtempSync(join(tmpdir(), 'leverframe-preflight-root-'));
+    testDirectory = mkdtempSync(join(tmpdir(), 'leverframe-preflight-test-'));
+    hostVisibleWorkspaceRoot = join(testDirectory, 'jobs');
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    rmSync(hostVisibleWorkspaceRoot, { force: true, recursive: true });
+    rmSync(testDirectory, { force: true, recursive: true });
   });
 
   it('proves the disposable environment and removes its workspace and sandbox', async () => {
@@ -49,6 +51,8 @@ describe('sandbox runtime preflight', () => {
       'shared_skills=disabled',
     );
 
+    expect(existsSync(hostVisibleWorkspaceRoot)).toBe(true);
+    expect(statSync(hostVisibleWorkspaceRoot).mode & 0o777).toBe(0o700);
     expect(existsSync(workspace)).toBe(false);
     expect(runProcess).toHaveBeenLastCalledWith('sbx', ['rm', '--force', sandboxName], {
       timeoutMilliseconds: 2 * 60 * 1000,
