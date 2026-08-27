@@ -12,6 +12,11 @@ import {
   validateFindingUpdates,
 } from '../review/result.js';
 import { runProcess, runStreamingProcess } from '../system/process.js';
+import {
+  inspectSandboxRuntime,
+  probeSandboxEnvironment,
+  sandboxCreateArguments,
+} from './runtime.js';
 
 interface SandboxReview {
   path: string;
@@ -26,6 +31,7 @@ export class SandboxReviewer {
       model: string;
       reasoningEffort: string;
       resourcesDirectory: string;
+      sandboxTemplate: string;
       traceStore: ExecutionTraceStore;
     },
   ) {}
@@ -71,28 +77,37 @@ export class SandboxReviewer {
       join(this.options.resourcesDirectory, 'review-prompt.md'),
       join(stagedResourcesDirectory, 'review-prompt.md'),
     );
+    const recorder = new CodexExecutionRecorder(
+      this.options.traceStore,
+      input.jobId,
+      input.attempt,
+    );
 
     try {
+      const runtime = await inspectSandboxRuntime(this.options.sandboxTemplate);
+      this.options.traceStore.append(input.jobId, input.attempt, {
+        type: 'sandbox_environment',
+        status: 'configured',
+        message: `template=${runtime.template}\nsbx=${runtime.cliVersion}\nshared_skills=requested_disabled`,
+      });
       await runProcess(
         'sbx',
-        [
-          'create',
-          '--quiet',
-          '--name',
-          sandboxName,
-          '--cpus',
-          '4',
-          '--memory',
-          '8g',
-          'codex',
-          sandboxAnchor,
-          `${stagedResourcesDirectory}:ro`,
-        ],
+        sandboxCreateArguments({
+          name: sandboxName,
+          template: this.options.sandboxTemplate,
+          workspaces: [sandboxAnchor, `${stagedResourcesDirectory}:ro`],
+        }),
         {
           signal: input.signal,
           timeoutMilliseconds: 5 * 60 * 1000,
         },
       );
+      const baseline = await probeSandboxEnvironment(sandboxName, input.signal);
+      this.options.traceStore.append(input.jobId, input.attempt, {
+        type: 'sandbox_environment',
+        status: 'ready',
+        message: baseline,
+      });
       await checkoutPullRequestInSandbox({
         baseSha: input.baseSha,
         cloneUrl: input.cloneUrl,
@@ -181,11 +196,6 @@ export class SandboxReviewer {
         schema: readFileSync(join(this.options.resourcesDirectory, 'review-schema.json'), 'utf8'),
       });
 
-      const recorder = new CodexExecutionRecorder(
-        this.options.traceStore,
-        input.jobId,
-        input.attempt,
-      );
       recorder.start();
       try {
         await runStreamingProcess(
@@ -240,6 +250,7 @@ export class SandboxReviewer {
       });
       return { path: resultPath, result, reviewMode, reviewableLines };
     } finally {
+      recorder.stop();
       await runProcess('sbx', ['rm', '--force', sandboxName], {
         timeoutMilliseconds: 2 * 60 * 1000,
       }).catch(() => undefined);

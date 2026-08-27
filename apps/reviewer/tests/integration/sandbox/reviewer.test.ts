@@ -31,6 +31,9 @@ describe('SandboxReviewer', () => {
     writeFileSync(join(resourcesDirectory, 'review-schema.json'), '{"type":"object"}\n');
 
     vi.mocked(runProcess).mockImplementation((_command, arguments_) => {
+      if (arguments_[0] === 'version') {
+        return Promise.resolve({ stderr: '', stdout: 'sbx version: v0.39.0 test\n' });
+      }
       if (arguments_[0] === 'exec' && arguments_.includes('cat')) {
         return Promise.resolve({
           stderr: '',
@@ -47,6 +50,7 @@ describe('SandboxReviewer', () => {
       model: 'gpt-5.6-luna',
       reasoningEffort: 'medium',
       resourcesDirectory,
+      sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
       traceStore: new ExecutionTraceStore(join(root, 'shared', 'jobs')),
     });
     const prepared: Array<{ prompt: string; schema: string; model: string; reasoning: string }> =
@@ -85,7 +89,13 @@ describe('SandboxReviewer', () => {
     expect(existsSync(join(jobDirectory, 'sandbox-anchor'))).toBe(false);
     expect(runProcess).toHaveBeenCalledWith(
       'sbx',
-      expect.arrayContaining(['create', `${stagedResourcesDirectory}:ro`]),
+      expect.arrayContaining([
+        'create',
+        '--template',
+        `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
+        '--no-share-skills',
+        `${stagedResourcesDirectory}:ro`,
+      ]),
       expect.any(Object),
     );
     const fetchCall = vi

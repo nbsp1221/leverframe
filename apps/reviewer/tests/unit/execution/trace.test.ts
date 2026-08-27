@@ -23,6 +23,7 @@ describe('execution trace', () => {
   it('frames split JSONL chunks and separates heartbeat from Codex activity', () => {
     const store = fixture();
     const recorder = new CodexExecutionRecorder(store, 42, 1);
+    recorder.start();
     recorder.write('{"type":"thread.started"}\n{"type":"item.started","item":{"id":"cmd_1",');
     recorder.write('"type":"command_execution","command":"pnpm test","status":"in_progress"}}\n');
     recorder.pulse();

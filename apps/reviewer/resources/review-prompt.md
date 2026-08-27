@@ -2,6 +2,12 @@ Review this pull request for actionable defects introduced by its exact base-to-
 Use the repository and any useful tools or focused tests to understand and verify changed behavior.
 You may install dependencies, start services, use Docker, or run a browser inside this disposable environment.
 Choose the investigation path yourself.
+Before choosing verification commands, inspect relevant repository guidance, CI workflows, lockfiles, runtime declarations, container configuration, and changed files.
+Treat these as evidence rather than a fixed priority list, and choose the environment separately for each verification purpose when appropriate.
+Respect exact repository toolchain declarations and package-manager versions; do not treat a broad compatibility range such as `engines.node` as an exact pin by itself.
+Use the baseline tools, `mise exec`, `uv`, repository wrappers, Dev Containers, or the private Docker Engine as the evidence warrants.
+Report the selected environment and evidence, actual tool versions, commands run, and any verification that remained unavailable.
+Do not report an infrastructure or environment limitation as a code defect unless the repository's supported reproducible procedure itself fails and the changed code causes that failure.
 
 Report a finding only when it identifies a concrete changed-file line and a reachable failure or precise failing path.
 Focus on correctness, security, data integrity, concurrency, API contracts, and runtime behavior.

@@ -297,6 +297,7 @@ function mergeSnapshot(
 
 function visibleEvent(event: ReviewExecutionEvent): boolean {
   return [
+    'sandbox_environment',
     'command_completed',
     'agent_message',
     'file_change',

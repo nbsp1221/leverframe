@@ -19,13 +19,13 @@ export class CodexExecutionRecorder {
     readonly attempt: number,
   ) {
     this.#append({ type: 'attempt_started' });
-    this.pulse();
   }
 
   start(): void {
     if (this.#heartbeat !== undefined) {
       return;
     }
+    this.pulse();
     this.#heartbeat = setInterval(() => this.pulse(), HEARTBEAT_MILLISECONDS);
     this.#heartbeat.unref();
   }

@@ -26,6 +26,7 @@ Requirements:
 - Node.js 24 or newer
 - pnpm 11
 - Docker Engine and Docker Sandboxes (`sbx`)
+- An immutable review sandbox template built from `infra/reviewer-sandbox/`
 
 Install and validate the current skeleton:
 
@@ -50,6 +51,8 @@ cp .env.example .env
 ```
 
 Runtime state, GitHub App credentials, and review artifacts live under the ignored `.leverframe/` directory by default. Environment variables are grouped by responsibility rather than product name: `APP_*` controls the process, `GITHUB_*` controls the integration, and `REVIEW_*` controls review execution.
+
+`REVIEW_SANDBOX_TEMPLATE` is required and must be the content-addressed local tag printed by the template installer. Leverframe does not fall back to Docker Sandbox's mutable default template. The template provides pinned baseline tools while Codex remains responsible for selecting repository-specific runtimes from project evidence.
 
 The quality-first review defaults are `gpt-5.6-sol` with `high` reasoning. Model capacity or execution failures are reported as failed review jobs; Leverframe does not silently switch to another model.
 
@@ -154,6 +157,16 @@ api.example.com {
 The repository does not modify or reload an operating Caddy configuration. For local testing, the ignored `compose.override.yaml` connects both services to the existing external `caddy-network`; verify that network and the current Caddy aliases before use. Keep any host-specific Caddy file outside this repository or in an ignored local deployment directory.
 
 Before changing an operating Caddy route, save a backup, run `caddy validate --config <config>`, and inspect the rendered route priority. After explicit approval, use a graceful reload and smoke test both `https://<host>/en/reviews` and same-origin `/api/v1/status`; also verify an existing virtual host before and after the reload. Do not stop the Caddy container or reload unrelated virtual hosts. The sandbox daemon directory is mounted read-only rather than binding only the socket file, so a daemon restart can replace the socket without leaving the reviewer attached to a stale inode. Starting and supervising the host `sandboxd` process is an infrastructure prerequisite and is intentionally outside Leverframe's deployment scope.
+
+The reviewer requires Docker Sandboxes 0.39.0 or newer. At service startup it creates and removes a disposable canary using the configured local template, verifies the pinned baseline, sudo, the private Docker Engine, and shared-skill isolation, and starts the review worker only after that preflight succeeds.
+
+Install the review template into the local Docker Sandbox runtime with:
+
+```sh
+infra/reviewer-sandbox/install.sh
+```
+
+The installer builds for the Docker host's `amd64` or `arm64` architecture, verifies every pinned input while building, loads the image into the local Sandbox template store, removes its temporary archive and Docker build tags, and prints the `REVIEW_SANDBOX_TEMPLATE` value to copy into `.env`. No registry account or package publication is required. Pass an explicit platform such as `linux/arm64` only when cross-building intentionally.
 
 Before an image or schema upgrade, stop only the reviewer so SQLite closes cleanly, copy every `state.sqlite*` file to a timestamped directory, and record checksums. Keep the previous image and Compose file until the upgraded reviewer, web UI, and representative review artifacts have passed smoke tests.
 

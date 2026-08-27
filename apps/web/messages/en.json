@@ -166,6 +166,7 @@
     "emptyOutput": "No output",
     "exitCode": "exit code",
     "traceEvent_agent_message": "Codex message",
+    "traceEvent_sandbox_environment": "Sandbox environment",
     "traceEvent_file_change": "File change activity",
     "traceEvent_tool_activity": "Tool activity",
     "traceEvent_turn_failed": "Codex run failed",
