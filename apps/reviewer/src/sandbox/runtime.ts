@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runProcess } from '../system/process.js';
 
@@ -52,9 +51,12 @@ export async function sandboxRuntimeAvailable(template: string): Promise<boolean
   }
 }
 
-export async function preflightSandboxRuntime(template: string): Promise<string> {
+export async function preflightSandboxRuntime(
+  template: string,
+  hostVisibleWorkspaceRoot: string,
+): Promise<string> {
   const identity = await inspectSandboxRuntime(template);
-  const workspace = mkdtempSync(join(tmpdir(), 'leverframe-sandbox-preflight-'));
+  const workspace = mkdtempSync(join(hostVisibleWorkspaceRoot, '.sandbox-preflight-'));
   const name = `leverframe-preflight-${randomUUID().slice(0, 12)}`;
   let created = false;
   try {

@@ -145,12 +145,19 @@ function serve(): void {
 
   server.listen(config.port, config.host, () => {
     console.log(`Leverframe listening on http://${config.host}:${config.port}`);
-    void startWorkersAfterRecovery(config.sandboxTemplate, database, worker, threadWorker);
+    void startWorkersAfterRecovery(
+      config.sandboxTemplate,
+      config.jobsDirectory,
+      database,
+      worker,
+      threadWorker,
+    );
   });
 }
 
 async function startWorkersAfterRecovery(
   sandboxTemplate: string,
+  jobsDirectory: string,
   database: JobDatabase,
   worker: ReviewWorker,
   threadWorker: ThreadSideEffectWorker,
@@ -165,7 +172,7 @@ async function startWorkersAfterRecovery(
   }
   threadWorker.start();
   try {
-    const evidence = await preflightSandboxRuntime(sandboxTemplate);
+    const evidence = await preflightSandboxRuntime(sandboxTemplate, jobsDirectory);
     console.log(`sandbox preflight passed\n${evidence}`);
     worker.start();
   } catch (error) {

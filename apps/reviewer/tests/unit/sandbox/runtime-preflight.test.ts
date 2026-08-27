@@ -1,5 +1,7 @@
-import { existsSync } from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { preflightSandboxRuntime } from '../../../src/sandbox/runtime.js';
 import { runProcess } from '../../../src/system/process.js';
 
@@ -10,8 +12,15 @@ vi.mock('../../../src/system/process.js', () => ({
 const template = `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`;
 
 describe('sandbox runtime preflight', () => {
+  let hostVisibleWorkspaceRoot: string;
+
+  beforeEach(() => {
+    hostVisibleWorkspaceRoot = mkdtempSync(join(tmpdir(), 'leverframe-preflight-root-'));
+  });
+
   afterEach(() => {
     vi.resetAllMocks();
+    rmSync(hostVisibleWorkspaceRoot, { force: true, recursive: true });
   });
 
   it('proves the disposable environment and removes its workspace and sandbox', async () => {
@@ -25,6 +34,7 @@ describe('sandbox runtime preflight', () => {
         sandboxName = arguments_[arguments_.indexOf('--name') + 1] ?? '';
         workspace = arguments_.at(-1) ?? '';
         expect(existsSync(workspace)).toBe(true);
+        expect(dirname(workspace)).toBe(hostVisibleWorkspaceRoot);
       }
       if (arguments_[0] === 'exec') {
         return Promise.resolve({
@@ -35,7 +45,9 @@ describe('sandbox runtime preflight', () => {
       return Promise.resolve({ stderr: '', stdout: '' });
     });
 
-    await expect(preflightSandboxRuntime(template)).resolves.toContain('shared_skills=disabled');
+    await expect(preflightSandboxRuntime(template, hostVisibleWorkspaceRoot)).resolves.toContain(
+      'shared_skills=disabled',
+    );
 
     expect(existsSync(workspace)).toBe(false);
     expect(runProcess).toHaveBeenLastCalledWith('sbx', ['rm', '--force', sandboxName], {
@@ -60,7 +72,9 @@ describe('sandbox runtime preflight', () => {
       return Promise.resolve({ stderr: '', stdout: '' });
     });
 
-    await expect(preflightSandboxRuntime(template)).rejects.toThrow('probe failed');
+    await expect(preflightSandboxRuntime(template, hostVisibleWorkspaceRoot)).rejects.toThrow(
+      'probe failed',
+    );
 
     expect(existsSync(workspace)).toBe(false);
     expect(runProcess).toHaveBeenLastCalledWith('sbx', ['rm', '--force', sandboxName], {
@@ -86,7 +100,9 @@ describe('sandbox runtime preflight', () => {
       return Promise.resolve({ stderr: '', stdout: '' });
     });
 
-    await expect(preflightSandboxRuntime(template)).rejects.toThrow('cleanup failed');
+    await expect(preflightSandboxRuntime(template, hostVisibleWorkspaceRoot)).rejects.toThrow(
+      'cleanup failed',
+    );
     expect(existsSync(workspace)).toBe(false);
   });
 });
