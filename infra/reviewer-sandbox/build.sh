@@ -5,7 +5,15 @@ script_directory="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 . "${script_directory}/versions.env"
 
 image="${1:?usage: build.sh IMAGE [PLATFORM]}"
-platform="${2:-linux/amd64}"
+platform="${2:-}"
+if [ -z "${platform}" ]; then
+  architecture="$(docker version --format '{{.Server.Arch}}')"
+  case "${architecture}" in
+    amd64 | arm64) ;;
+    *) echo 'Docker server architecture must be amd64 or arm64.' >&2; exit 1 ;;
+  esac
+  platform="linux/${architecture}"
+fi
 
 docker buildx build \
   --build-arg "SANDBOX_BASE_IMAGE=${SANDBOX_BASE_IMAGE}" \

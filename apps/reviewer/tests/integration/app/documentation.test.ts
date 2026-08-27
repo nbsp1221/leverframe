@@ -41,7 +41,7 @@ async function fixture(): Promise<string> {
       webhookUrl: 'https://github.example.com/webhooks/github',
       reasoningEffort: 'low',
       resourcesDirectory: join(directory, 'resources'),
-      sandboxTemplate: `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
+      sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
     },
     database,
     credentials,

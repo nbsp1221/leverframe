@@ -50,8 +50,8 @@ const webhookUrlSchema = z.string().superRefine((value, context) => {
 const sandboxTemplateSchema = z
   .string()
   .regex(
-    /^[a-z0-9.-]+(?::[0-9]+)?\/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*@sha256:[0-9a-f]{64}$/,
-    'must be a fully qualified OCI image reference pinned by sha256 digest',
+    /^leverframe-review-sandbox:sha256-[0-9a-f]{64}$/,
+    'must be a content-addressed local Leverframe sandbox template tag',
   );
 
 const serverConfigSchema = z.object({

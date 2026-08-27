@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadServerConfig } from '../../../src/app/config.js';
 
-const sandboxTemplate = `ghcr.io/example/template@sha256:${'a'.repeat(64)}`;
+const sandboxTemplate = `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`;
 
 describe('server configuration', () => {
   it('derives cohesive state paths from one data directory', () => {
@@ -116,7 +116,7 @@ describe('server configuration', () => {
     ).toThrow();
   });
 
-  it('requires an immutable sandbox template instead of falling back to a tag', () => {
+  it('requires a content-addressed local sandbox template', () => {
     const environment = {
       APP_UI_BASE_URL: 'https://leverframe.example.com',
       GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
@@ -127,20 +127,20 @@ describe('server configuration', () => {
     expect(() =>
       loadServerConfig({
         ...environment,
-        REVIEW_SANDBOX_TEMPLATE: 'ghcr.io/example/template:latest',
+        REVIEW_SANDBOX_TEMPLATE: 'leverframe-review-sandbox:latest',
       }),
-    ).toThrow(/sha256/);
+    ).toThrow(/content-addressed/);
     for (const malformedReference of [
-      `ghcr.io/example//template@sha256:${'a'.repeat(64)}`,
-      `ghcr.io/example/template/@sha256:${'a'.repeat(64)}`,
-      `ghcr.io/_example/template@sha256:${'a'.repeat(64)}`,
+      `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
+      `leverframe-review-sandbox:sha256-${'A'.repeat(64)}`,
+      `other-review-sandbox:sha256-${'a'.repeat(64)}`,
     ]) {
       expect(() =>
         loadServerConfig({
           ...environment,
           REVIEW_SANDBOX_TEMPLATE: malformedReference,
         }),
-      ).toThrow(/sha256/);
+      ).toThrow(/content-addressed/);
     }
   });
 

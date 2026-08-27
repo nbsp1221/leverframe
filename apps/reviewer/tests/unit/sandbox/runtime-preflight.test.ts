@@ -7,7 +7,7 @@ vi.mock('../../../src/system/process.js', () => ({
   runProcess: vi.fn(),
 }));
 
-const template = `ghcr.io/example/template@sha256:${'a'.repeat(64)}`;
+const template = `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`;
 
 describe('sandbox runtime preflight', () => {
   afterEach(() => {

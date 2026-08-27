@@ -50,7 +50,7 @@ describe('SandboxReviewer', () => {
       model: 'gpt-5.6-luna',
       reasoningEffort: 'medium',
       resourcesDirectory,
-      sandboxTemplate: `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
+      sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
       traceStore: new ExecutionTraceStore(join(root, 'shared', 'jobs')),
     });
     const prepared: Array<{ prompt: string; schema: string; model: string; reasoning: string }> =
@@ -92,7 +92,7 @@ describe('SandboxReviewer', () => {
       expect.arrayContaining([
         'create',
         '--template',
-        `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
+        `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
         '--no-share-skills',
         `${stagedResourcesDirectory}:ro`,
       ]),

@@ -10,7 +10,7 @@ describe('sandbox runtime', () => {
     expect(
       sandboxCreateArguments({
         name: 'review-42',
-        template: `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
+        template: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
         workspaces: ['/tmp/workspace', '/tmp/resources:ro'],
       }),
     ).toEqual([
@@ -23,7 +23,7 @@ describe('sandbox runtime', () => {
       '--memory',
       '8g',
       '--template',
-      `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
+      `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
       '--no-share-skills',
       'codex',
       '/tmp/workspace',

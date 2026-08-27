@@ -77,7 +77,7 @@ const server = createLeverframeServer(
     webhookUrl: 'http://127.0.0.1:16722/webhooks/github',
     reasoningEffort: 'low',
     resourcesDirectory: fileURLToPath(new URL('../../resources', import.meta.url)),
-    sandboxTemplate: `ghcr.io/example/template@sha256:${'a'.repeat(64)}`,
+    sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
   },
   database,
   credentials,
