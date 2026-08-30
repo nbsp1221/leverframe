@@ -25,6 +25,7 @@ const pullRequestWebhookSchema = z.object({
     draft: z.boolean(),
     head: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/i) }),
     number: z.number().int().positive(),
+    title: z.string(),
   }),
   repository: z.object({ full_name: z.string().min(3) }),
 });
@@ -120,6 +121,7 @@ export function decideWebhook(input: {
       installationId: payload.installation.id,
       policyVersion: input.policyVersion ?? 'v2',
       pullRequestNumber: payload.pull_request.number,
+      pullRequestTitle: payload.pull_request.title,
       repository: payload.repository.full_name,
     },
   };

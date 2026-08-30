@@ -12,6 +12,7 @@ function pullRequestBody(
     before?: string;
     draft?: boolean;
     ownerId?: number;
+    title?: string;
   } = {},
 ): Buffer {
   return Buffer.from(
@@ -24,6 +25,7 @@ function pullRequestBody(
         draft: overrides.draft ?? false,
         head: { sha: 'a'.repeat(40) },
         number: 7,
+        title: overrides.title ?? 'Preserve this pull request title',
       },
       repository: {
         full_name: 'example/project',
@@ -60,6 +62,7 @@ describe('GitHub webhook intake', () => {
         installationId: 42,
         policyVersion: 'v2',
         pullRequestNumber: 7,
+        pullRequestTitle: 'Preserve this pull request title',
         repository: 'example/project',
       },
     });

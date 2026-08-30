@@ -72,6 +72,7 @@ function webhookBody(action = 'opened', draft = false): Buffer {
         draft,
         head: { sha: 'a'.repeat(40) },
         number: 7,
+        title: 'Preserve this pull request title',
       },
       repository: { full_name: 'example/project', owner: { id: 1 } },
     }),
@@ -172,6 +173,10 @@ describe('Leverframe server', () => {
       status: 'duplicate',
     });
     expect(database.countJobs()).toBe(1);
+    expect(database.listReviewJobs({ page: 1 }).items[0]).toMatchObject({
+      pullRequestTitle: 'Preserve this pull request title',
+      state: 'QUEUED',
+    });
     expect(queuedHeads).toEqual(['a'.repeat(40)]);
   });
 

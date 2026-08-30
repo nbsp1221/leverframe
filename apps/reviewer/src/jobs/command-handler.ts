@@ -76,6 +76,7 @@ export class ManualCommandHandler {
         installationId: command.installationId,
         policyVersion: `v3:${command.command}:${command.deliveryId}`,
         pullRequestNumber: command.pullRequestNumber,
+        pullRequestTitle: pullRequest.title,
         repository: command.repository,
       };
       const result = this.options.database.enqueuePullRequest(job);

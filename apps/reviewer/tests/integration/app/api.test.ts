@@ -131,6 +131,42 @@ describe('versioned reviewer API contracts', () => {
     expect(parsed.sandbox.status).toBe('unknown');
   });
 
+  it('exposes a pull request title in list and detail responses before claiming the job', async () => {
+    const { database, url } = await fixture();
+    database.enqueuePullRequest({
+      action: 'opened',
+      deliveryId: 'queued-title-delivery',
+      headSha: 'c'.repeat(40),
+      installationId: 42,
+      policyVersion: 'v2',
+      pullRequestNumber: 2,
+      pullRequestTitle: 'Visible while queued',
+      repository: 'owner/repo',
+    });
+    const queued = database.listReviewJobs({ page: 1 }).items[0];
+    if (queued === undefined) {
+      throw new Error('queued fixture job was not persisted');
+    }
+
+    const list = reviewListResponseSchema.parse(
+      await (await fetch(`${url}/api/v1/reviews?page=1`)).json(),
+    );
+    expect(list.items[0]).toMatchObject({
+      id: queued.id,
+      pull_request_title: 'Visible while queued',
+      status: 'queued',
+    });
+
+    const detail = reviewDetailSchema.parse(
+      await (await fetch(`${url}/api/v1/reviews/${queued.id}`)).json(),
+    );
+    expect(detail).toMatchObject({
+      id: queued.id,
+      pull_request_title: 'Visible while queued',
+      status: 'queued',
+    });
+  });
+
   it('returns a bounded execution snapshot and resumable terminal SSE stream', async () => {
     const { job, traceStore, url } = await fixture();
     traceStore.append(job.id, job.attempt ?? 1, { type: 'attempt_started' });
