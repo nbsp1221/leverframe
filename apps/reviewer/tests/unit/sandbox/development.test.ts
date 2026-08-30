@@ -111,4 +111,26 @@ describe('DevelopmentSandboxManager', () => {
       /identity/,
     );
   });
+
+  it('hashes committed, staged, unstaged, untracked, and submodule candidate state without changing the index', async () => {
+    const sandboxManager = manager();
+    sandboxManager.paths(7, true);
+    vi.mocked(runProcess)
+      .mockResolvedValueOnce({ stdout: `${baseSha}\n`, stderr: '' })
+      .mockResolvedValueOnce({
+        stdout: `# branch.oid ${baseSha}${'\0'}# branch.head codex/candidate${'\0'}1 .M N... src/index.ts${'\0'}`,
+        stderr: '',
+      })
+      .mockResolvedValueOnce({ stdout: 'unstaged diff', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'staged diff', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'submodule state', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'untracked hash manifest', stderr: '' });
+
+    const candidate = await sandboxManager.candidateIdentity(7);
+
+    expect(candidate).toMatchObject({ dirty: true, headSha: baseSha });
+    expect(candidate.hash).toMatch(/^[0-9a-f]{64}$/);
+    const commands = vi.mocked(runProcess).mock.calls.map((call) => call[1]?.join(' '));
+    expect(commands.some((command) => command?.includes('git add'))).toBe(false);
+  });
 });

@@ -31,6 +31,14 @@ export interface ServerHooks {
   onJobQueued?: (job: PullRequestJobInput) => void;
   onManualCommand?: (command: ManualCommand) => Promise<{ status: string }>;
   onPullRequestCancelled?: (cancellation: PullRequestCancellationInput) => void;
+  onDevelopmentRunCreated?: (runId: number) => void;
+  onDevelopmentPlanApproval?: (input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    approve: boolean;
+    response?: string;
+  }) => void;
   /** Optional bounded context adapter. It must never return credentials or an entire diff. */
   getFindingContext?: (input: {
     repository: string;

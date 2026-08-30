@@ -77,10 +77,23 @@ describe('DevelopmentRepository', () => {
 
   it('allows only one of 100 stale claim contenders to own a run', () => {
     const { database, repository } = setup();
-    const run = repository.createRun({
+    const created = repository.createRun({
       goal: 'Claim once.',
       repository: 'example/leverframe',
       now,
+    });
+    const run = repository.transition({
+      id: created.id,
+      expectedGeneration: created.generation,
+      expectedLockVersion: created.lockVersion,
+      phase: 'PREPARING',
+      advanceGeneration: true,
+      event: {
+        type: 'preparing_started',
+        source: 'LEVERFRAME',
+        trust: 'SYSTEM_OBSERVED',
+        observedAt: now,
+      },
     });
     const outcomes = Array.from({ length: 100 }, (_, index) => {
       try {

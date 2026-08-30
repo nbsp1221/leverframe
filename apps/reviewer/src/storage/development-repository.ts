@@ -53,6 +53,8 @@ export interface DevelopmentAttempt {
   state: 'CLAIMED' | 'RUNNING' | 'WAITING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'LOST';
   leaseOwner?: string;
   leaseExpiresAt?: string;
+  threadId?: string;
+  turnId?: string;
 }
 
 export class DevelopmentConflictError extends Error {}
@@ -154,6 +156,19 @@ export class DevelopmentRepository {
     return row === undefined ? undefined : mapRun(row);
   }
 
+  listRuns(): DevelopmentRun[] {
+    return (
+      this.database
+        .prepare(`
+          SELECT r.*, w.revision, w.goal
+          FROM development_runs r
+          JOIN development_work_revisions w ON w.id = r.accepted_work_revision_id
+          ORDER BY r.last_activity_at DESC, r.id DESC
+        `)
+        .all() as unknown as DevelopmentRunRow[]
+    ).map(mapRun);
+  }
+
   requireRun(id: number): DevelopmentRun {
     const run = this.getRun(id);
     if (run === undefined) {
@@ -171,46 +186,7 @@ export class DevelopmentRepository {
     advanceGeneration?: boolean;
     event: DevelopmentEventInput;
   }): DevelopmentRun {
-    return transaction(this.database, () => {
-      const current = this.requireRun(input.id);
-      const isWaitingResume =
-        current.phase === 'WAITING_FOR_INPUT' && current.priorPhase === input.phase;
-      if (!isWaitingResume && !phaseTransitions[current.phase].includes(input.phase)) {
-        throw new DevelopmentConflictError(
-          `illegal development transition ${current.phase} -> ${input.phase}`,
-        );
-      }
-      if (input.phase === 'WAITING_FOR_INPUT' && input.priorPhase !== current.phase) {
-        throw new DevelopmentConflictError('waiting transition must preserve its prior phase');
-      }
-      if (input.phase !== 'WAITING_FOR_INPUT' && input.priorPhase !== undefined) {
-        throw new DevelopmentConflictError('prior phase is only valid while waiting for input');
-      }
-      const now = input.event.observedAt ?? new Date().toISOString();
-      const generation = input.expectedGeneration + (input.advanceGeneration === true ? 1 : 0);
-      const result = this.database
-        .prepare(`
-          UPDATE development_runs SET
-            phase = ?, prior_phase = ?, generation = ?, lock_version = lock_version + 1,
-            last_activity_at = ?, updated_at = ?
-          WHERE id = ? AND generation = ? AND lock_version = ?
-        `)
-        .run(
-          input.phase,
-          input.priorPhase ?? null,
-          generation,
-          now,
-          now,
-          input.id,
-          input.expectedGeneration,
-          input.expectedLockVersion,
-        );
-      if (result.changes !== 1) {
-        throw new DevelopmentConflictError(`development run ${input.id} changed`);
-      }
-      this.insertEvent(input.id, generation, { ...input.event, observedAt: now });
-      return this.requireRun(input.id);
-    });
+    return transaction(this.database, () => this.transitionWithinTransaction(input));
   }
 
   setCandidate(input: {
@@ -276,6 +252,11 @@ export class DevelopmentRepository {
         run.lockVersion !== input.expectedLockVersion
       ) {
         throw new DevelopmentConflictError(`development run ${input.runId} changed`);
+      }
+      if (run.phase !== input.phase) {
+        throw new DevelopmentConflictError(
+          `cannot claim ${input.phase} while development run is ${run.phase}`,
+        );
       }
       const attempt = Number(
         (
@@ -346,6 +327,102 @@ export class DevelopmentRepository {
     return mapAttempt(row);
   }
 
+  findActiveAttempt(runId: number): DevelopmentAttempt | undefined {
+    const row = this.database
+      .prepare(
+        "SELECT * FROM development_attempts WHERE run_id = ? AND state IN ('CLAIMED','RUNNING','WAITING') ORDER BY id DESC LIMIT 1",
+      )
+      .get(runId) as DevelopmentAttemptRow | undefined;
+    return row === undefined ? undefined : mapAttempt(row);
+  }
+
+  findLatestThreadId(runId: number): string | undefined {
+    const row = this.database
+      .prepare(
+        'SELECT thread_id FROM development_attempts WHERE run_id = ? AND thread_id IS NOT NULL ORDER BY id DESC LIMIT 1',
+      )
+      .get(runId) as { thread_id: string } | undefined;
+    return row?.thread_id;
+  }
+
+  attachAttemptRuntime(input: {
+    id: number;
+    generation: number;
+    leaseOwner: string;
+    threadId: string;
+    turnId?: string;
+    state?: 'RUNNING' | 'WAITING';
+    now?: string;
+  }): DevelopmentAttempt {
+    const now = input.now ?? new Date().toISOString();
+    const result = this.database
+      .prepare(`
+        UPDATE development_attempts SET
+          thread_id = ?, turn_id = COALESCE(?, turn_id), state = ?, updated_at = ?
+        WHERE id = ? AND generation = ? AND lease_owner = ?
+          AND state IN ('CLAIMED','RUNNING','WAITING')
+      `)
+      .run(
+        input.threadId,
+        input.turnId ?? null,
+        input.state ?? 'RUNNING',
+        now,
+        input.id,
+        input.generation,
+        input.leaseOwner,
+      );
+    if (result.changes !== 1) {
+      throw new DevelopmentConflictError(`development attempt ${input.id} changed`);
+    }
+    return this.requireAttempt(input.id);
+  }
+
+  completeAttempt(input: {
+    id: number;
+    runId: number;
+    generation: number;
+    leaseOwner: string;
+    state: 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'LOST';
+    outcomeCode: string;
+    outcomeExcerpt?: string;
+    now?: string;
+  }): DevelopmentAttempt {
+    const now = input.now ?? new Date().toISOString();
+    return transaction(this.database, () => {
+      const result = this.database
+        .prepare(`
+          UPDATE development_attempts SET
+            state = ?, outcome_code = ?, outcome_excerpt = ?, lease_owner = NULL,
+            lease_expires_at = NULL, completed_at = ?, updated_at = ?
+          WHERE id = ? AND run_id = ? AND generation = ? AND lease_owner = ?
+            AND state IN ('CLAIMED','RUNNING','WAITING')
+        `)
+        .run(
+          input.state,
+          input.outcomeCode,
+          input.outcomeExcerpt ?? null,
+          now,
+          now,
+          input.id,
+          input.runId,
+          input.generation,
+          input.leaseOwner,
+        );
+      if (result.changes !== 1) {
+        throw new DevelopmentConflictError(`development attempt ${input.id} changed`);
+      }
+      this.insertEvent(input.runId, input.generation, {
+        type: 'attempt_completed',
+        source: 'LEVERFRAME',
+        trust: 'SYSTEM_OBSERVED',
+        attemptId: input.id,
+        payload: { outcome_code: input.outcomeCode, state: input.state },
+        observedAt: now,
+      });
+      return this.requireAttempt(input.id);
+    });
+  }
+
   appendEvent(runId: number, generation: number, event: DevelopmentEventInput): number {
     return transaction(this.database, () => {
       const run = this.requireRun(runId);
@@ -354,6 +431,46 @@ export class DevelopmentRepository {
       }
       return this.insertEvent(runId, generation, event);
     });
+  }
+
+  listEvents(
+    runId: number,
+    afterSequence = 0,
+  ): Array<{
+    sequence: number;
+    generation: number;
+    type: string;
+    source: DevelopmentEventInput['source'];
+    trust: DevelopmentEventInput['trust'];
+    payload: Record<string, unknown>;
+    observedAt: string;
+  }> {
+    const rows = this.database
+      .prepare(`
+        SELECT sequence, generation, type, source, trust, payload_json, observed_at
+        FROM development_events
+        WHERE run_id = ? AND sequence > ?
+        ORDER BY sequence
+        LIMIT 1000
+      `)
+      .all(runId, afterSequence) as unknown as Array<{
+      sequence: number;
+      generation: number;
+      type: string;
+      source: DevelopmentEventInput['source'];
+      trust: DevelopmentEventInput['trust'];
+      payload_json: string;
+      observed_at: string;
+    }>;
+    return rows.map((row) => ({
+      sequence: Number(row.sequence),
+      generation: Number(row.generation),
+      type: row.type,
+      source: row.source,
+      trust: row.trust,
+      payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+      observedAt: row.observed_at,
+    }));
   }
 
   recordEvidence(input: {
@@ -420,36 +537,190 @@ export class DevelopmentRepository {
     now?: string;
   }): number {
     const now = input.now ?? new Date().toISOString();
+    return transaction(this.database, () =>
+      this.openPublicationApprovalWithinTransaction({ ...input, now }),
+    );
+  }
+
+  requestPublicationApproval(input: {
+    runId: number;
+    expectedGeneration: number;
+    expectedLockVersion: number;
+    workRevisionId: number;
+    candidateHash: string;
+    publicationKind: 'PUSH_AND_PR' | 'PUSH_EXISTING';
+    prompt: string;
+    now?: string;
+  }): DevelopmentRun {
+    const now = input.now ?? new Date().toISOString();
     return transaction(this.database, () => {
-      const run = this.requireRun(input.runId);
-      if (
-        run.generation !== input.generation ||
-        run.workRevisionId !== input.workRevisionId ||
-        run.candidateHash !== input.candidateHash
-      ) {
-        throw new DevelopmentConflictError(`publication candidate for run ${input.runId} is stale`);
-      }
-      const result = this.database
-        .prepare(`
-          INSERT INTO development_interrupts (
-            run_id, work_revision_id, generation, kind, status, prompt, context_json,
-            candidate_hash, publication_kind, requested_at, created_at, updated_at
-          ) VALUES (?, ?, ?, 'PUBLICATION_APPROVAL', 'OPEN', ?, ?, ?, ?, ?, ?, ?)
-        `)
-        .run(
-          input.runId,
-          input.workRevisionId,
-          input.generation,
-          input.prompt,
-          JSON.stringify(input.context ?? {}),
-          input.candidateHash,
-          input.publicationKind,
-          now,
-          now,
-          now,
-        );
-      return Number(result.lastInsertRowid);
+      this.openPublicationApprovalWithinTransaction({
+        ...input,
+        generation: input.expectedGeneration,
+        now,
+      });
+      return this.transitionWithinTransaction({
+        id: input.runId,
+        expectedGeneration: input.expectedGeneration,
+        expectedLockVersion: input.expectedLockVersion,
+        phase: 'AWAITING_PUBLICATION_APPROVAL',
+        event: {
+          type: 'publication_approval_required',
+          source: 'LEVERFRAME',
+          trust: 'SYSTEM_OBSERVED',
+          payload: { candidate_hash: input.candidateHash },
+          observedAt: now,
+        },
+      });
     });
+  }
+
+  openPlanApproval(input: {
+    runId: number;
+    workRevisionId: number;
+    generation: number;
+    prompt: string;
+    now?: string;
+  }): number {
+    const now = input.now ?? new Date().toISOString();
+    return transaction(this.database, () =>
+      this.openPlanApprovalWithinTransaction({ ...input, now }),
+    );
+  }
+
+  requestPlanApproval(input: {
+    runId: number;
+    expectedGeneration: number;
+    expectedLockVersion: number;
+    workRevisionId: number;
+    prompt: string;
+    now?: string;
+  }): DevelopmentRun {
+    const now = input.now ?? new Date().toISOString();
+    return transaction(this.database, () => {
+      this.openPlanApprovalWithinTransaction({
+        ...input,
+        generation: input.expectedGeneration,
+        now,
+      });
+      return this.transitionWithinTransaction({
+        id: input.runId,
+        expectedGeneration: input.expectedGeneration,
+        expectedLockVersion: input.expectedLockVersion,
+        phase: 'AWAITING_PLAN_APPROVAL',
+        event: {
+          type: 'plan_approval_required',
+          source: 'LEVERFRAME',
+          trust: 'SYSTEM_OBSERVED',
+          observedAt: now,
+        },
+      });
+    });
+  }
+
+  resolvePlanApproval(input: {
+    interruptId: number;
+    expectedLockVersion: number;
+    approve: boolean;
+    response?: string;
+    now?: string;
+  }): void {
+    const now = input.now ?? new Date().toISOString();
+    const result = this.database
+      .prepare(`
+        UPDATE development_interrupts SET
+          status = ?, response = ?, resolved_at = ?, updated_at = ?, lock_version = lock_version + 1
+        WHERE id = ? AND kind = 'PLAN_APPROVAL' AND status = 'OPEN' AND lock_version = ?
+      `)
+      .run(
+        input.approve ? 'APPROVED' : 'REJECTED',
+        input.response ?? null,
+        now,
+        now,
+        input.interruptId,
+        input.expectedLockVersion,
+      );
+    if (result.changes !== 1) {
+      throw new DevelopmentConflictError(`plan approval ${input.interruptId} changed`);
+    }
+  }
+
+  getOpenInterrupt(runId: number):
+    | {
+        id: number;
+        kind: 'CLARIFICATION' | 'PLAN_APPROVAL' | 'PUBLICATION_APPROVAL';
+        prompt: string;
+        lockVersion: number;
+        candidateHash?: string;
+        publicationKind?: 'PUSH_AND_PR' | 'PUSH_EXISTING';
+        requestedAt: string;
+      }
+    | undefined {
+    const row = this.database
+      .prepare(`
+        SELECT id, kind, prompt, lock_version, candidate_hash, publication_kind, requested_at
+        FROM development_interrupts WHERE run_id = ? AND status = 'OPEN'
+      `)
+      .get(runId) as
+      | {
+          id: number;
+          kind: 'CLARIFICATION' | 'PLAN_APPROVAL' | 'PUBLICATION_APPROVAL';
+          prompt: string;
+          lock_version: number;
+          candidate_hash: string | null;
+          publication_kind: 'PUSH_AND_PR' | 'PUSH_EXISTING' | null;
+          requested_at: string;
+        }
+      | undefined;
+    return row === undefined
+      ? undefined
+      : {
+          id: Number(row.id),
+          kind: row.kind,
+          prompt: row.prompt,
+          lockVersion: Number(row.lock_version),
+          requestedAt: row.requested_at,
+          ...(row.candidate_hash === null ? {} : { candidateHash: row.candidate_hash }),
+          ...(row.publication_kind === null ? {} : { publicationKind: row.publication_kind }),
+        };
+  }
+
+  listEvidence(runId: number): Array<{
+    id: number;
+    criterion: string;
+    method: 'COMMAND' | 'BROWSER' | 'INSPECTION' | 'EXTERNAL_OBSERVATION';
+    observation: string;
+    trust: DevelopmentEventInput['trust'];
+    verdict: 'PASSED' | 'FAILED' | 'UNRESOLVED';
+    candidateHash: string;
+    createdAt: string;
+  }> {
+    return (
+      this.database
+        .prepare(`
+          SELECT id, criterion, method, observation, trust, verdict, candidate_hash, created_at
+          FROM development_evidence WHERE run_id = ? ORDER BY id
+        `)
+        .all(runId) as unknown as Array<{
+        id: number;
+        criterion: string;
+        method: 'COMMAND' | 'BROWSER' | 'INSPECTION' | 'EXTERNAL_OBSERVATION';
+        observation: string;
+        trust: DevelopmentEventInput['trust'];
+        verdict: 'PASSED' | 'FAILED' | 'UNRESOLVED';
+        candidate_hash: string;
+        created_at: string;
+      }>
+    ).map((row) => ({
+      id: Number(row.id),
+      criterion: row.criterion,
+      method: row.method,
+      observation: row.observation,
+      trust: row.trust,
+      verdict: row.verdict,
+      candidateHash: row.candidate_hash,
+      createdAt: row.created_at,
+    }));
   }
 
   resolvePublicationApproval(input: {
@@ -480,6 +751,125 @@ export class DevelopmentRepository {
     if (result.changes !== 1) {
       throw new DevelopmentConflictError(`publication approval ${input.interruptId} changed`);
     }
+  }
+
+  private transitionWithinTransaction(input: {
+    id: number;
+    expectedGeneration: number;
+    expectedLockVersion: number;
+    phase: DevelopmentPhase;
+    priorPhase?: DevelopmentPhase;
+    advanceGeneration?: boolean;
+    event: DevelopmentEventInput;
+  }): DevelopmentRun {
+    const current = this.requireRun(input.id);
+    const isWaitingResume =
+      current.phase === 'WAITING_FOR_INPUT' && current.priorPhase === input.phase;
+    if (!isWaitingResume && !phaseTransitions[current.phase].includes(input.phase)) {
+      throw new DevelopmentConflictError(
+        `illegal development transition ${current.phase} -> ${input.phase}`,
+      );
+    }
+    if (input.phase === 'WAITING_FOR_INPUT' && input.priorPhase !== current.phase) {
+      throw new DevelopmentConflictError('waiting transition must preserve its prior phase');
+    }
+    if (input.phase !== 'WAITING_FOR_INPUT' && input.priorPhase !== undefined) {
+      throw new DevelopmentConflictError('prior phase is only valid while waiting for input');
+    }
+    const now = input.event.observedAt ?? new Date().toISOString();
+    const generation = input.expectedGeneration + (input.advanceGeneration === true ? 1 : 0);
+    const result = this.database
+      .prepare(`
+        UPDATE development_runs SET
+          phase = ?, prior_phase = ?, generation = ?, lock_version = lock_version + 1,
+          last_activity_at = ?, updated_at = ?
+        WHERE id = ? AND generation = ? AND lock_version = ?
+      `)
+      .run(
+        input.phase,
+        input.priorPhase ?? null,
+        generation,
+        now,
+        now,
+        input.id,
+        input.expectedGeneration,
+        input.expectedLockVersion,
+      );
+    if (result.changes !== 1) {
+      throw new DevelopmentConflictError(`development run ${input.id} changed`);
+    }
+    this.insertEvent(input.id, generation, { ...input.event, observedAt: now });
+    return this.requireRun(input.id);
+  }
+
+  private openPlanApprovalWithinTransaction(input: {
+    runId: number;
+    workRevisionId: number;
+    generation: number;
+    prompt: string;
+    now: string;
+  }): number {
+    const run = this.requireRun(input.runId);
+    if (run.generation !== input.generation || run.workRevisionId !== input.workRevisionId) {
+      throw new DevelopmentConflictError(`plan revision for run ${input.runId} is stale`);
+    }
+    const result = this.database
+      .prepare(`
+        INSERT INTO development_interrupts (
+          run_id, work_revision_id, generation, kind, status, prompt, context_json,
+          requested_at, created_at, updated_at
+        ) VALUES (?, ?, ?, 'PLAN_APPROVAL', 'OPEN', ?, '{}', ?, ?, ?)
+      `)
+      .run(
+        input.runId,
+        input.workRevisionId,
+        input.generation,
+        input.prompt,
+        input.now,
+        input.now,
+        input.now,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  private openPublicationApprovalWithinTransaction(input: {
+    runId: number;
+    workRevisionId: number;
+    generation: number;
+    candidateHash: string;
+    publicationKind: 'PUSH_AND_PR' | 'PUSH_EXISTING';
+    prompt: string;
+    context?: Record<string, unknown>;
+    now: string;
+  }): number {
+    const run = this.requireRun(input.runId);
+    if (
+      run.generation !== input.generation ||
+      run.workRevisionId !== input.workRevisionId ||
+      run.candidateHash !== input.candidateHash
+    ) {
+      throw new DevelopmentConflictError(`publication candidate for run ${input.runId} is stale`);
+    }
+    const result = this.database
+      .prepare(`
+        INSERT INTO development_interrupts (
+          run_id, work_revision_id, generation, kind, status, prompt, context_json,
+          candidate_hash, publication_kind, requested_at, created_at, updated_at
+        ) VALUES (?, ?, ?, 'PUBLICATION_APPROVAL', 'OPEN', ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        input.runId,
+        input.workRevisionId,
+        input.generation,
+        input.prompt,
+        JSON.stringify(input.context ?? {}),
+        input.candidateHash,
+        input.publicationKind,
+        input.now,
+        input.now,
+        input.now,
+      );
+    return Number(result.lastInsertRowid);
   }
 
   private insertEvent(runId: number, generation: number, event: DevelopmentEventInput): number {
@@ -543,6 +933,8 @@ interface DevelopmentAttemptRow {
   state: DevelopmentAttempt['state'];
   lease_owner: string | null;
   lease_expires_at: string | null;
+  thread_id: string | null;
+  turn_id: string | null;
 }
 
 function mapRun(row: DevelopmentRunRow): DevelopmentRun {
@@ -574,5 +966,7 @@ function mapAttempt(row: DevelopmentAttemptRow): DevelopmentAttempt {
     state: row.state,
     ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
     ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at }),
+    ...(row.thread_id === null ? {} : { threadId: row.thread_id }),
+    ...(row.turn_id === null ? {} : { turnId: row.turn_id }),
   };
 }

@@ -68,6 +68,13 @@ const serverConfigSchema = z.object({
   reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
   resourcesDirectory: z.string().min(1),
   sandboxTemplate: sandboxTemplateSchema,
+  development: z
+    .object({
+      repository: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
+      commitSkillDirectory: z.string().min(1),
+      verificationCommand: z.string().trim().min(1).max(2000),
+    })
+    .optional(),
 });
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
@@ -109,6 +116,7 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     environment.APP_RESOURCES_DIRECTORY ?? join(process.cwd(), 'resources');
   validateReviewResources(resourcesDirectory);
 
+  const developmentRepository = environment.DEVELOPMENT_REPOSITORY?.trim();
   return serverConfigSchema.parse({
     allowedOwnerId: Number(environment.GITHUB_ALLOWED_OWNER_ID),
     credentialsDirectory:
@@ -124,5 +132,15 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     reasoningEffort: environment.REVIEW_REASONING_EFFORT ?? 'high',
     resourcesDirectory,
     sandboxTemplate: environment.REVIEW_SANDBOX_TEMPLATE,
+    ...(developmentRepository === undefined || developmentRepository === ''
+      ? {}
+      : {
+          development: {
+            repository: developmentRepository,
+            commitSkillDirectory:
+              environment.DEVELOPMENT_COMMIT_SKILL_DIRECTORY ?? '/agent-skills/commit',
+            verificationCommand: environment.DEVELOPMENT_VERIFICATION_COMMAND ?? 'pnpm check',
+          },
+        }),
   });
 }

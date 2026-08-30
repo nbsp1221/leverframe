@@ -104,6 +104,42 @@ describe('server configuration', () => {
     });
   });
 
+  it('enables one local development repository with conservative defaults', () => {
+    expect(
+      loadServerConfig({
+        APP_UI_BASE_URL: 'https://leverframe.retn0.dev',
+        GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
+        GITHUB_ALLOWED_OWNER_ID: '42',
+        GITHUB_APP_NAME: 'example-leverframe-app',
+        REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
+        DEVELOPMENT_REPOSITORY: 'nbsp1221/leverframe',
+      }).development,
+    ).toEqual({
+      repository: 'nbsp1221/leverframe',
+      commitSkillDirectory: '/agent-skills/commit',
+      verificationCommand: 'pnpm check',
+    });
+  });
+
+  it('rejects malformed development configuration without a compatibility fallback', () => {
+    const environment = {
+      APP_UI_BASE_URL: 'https://leverframe.retn0.dev',
+      GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
+      GITHUB_ALLOWED_OWNER_ID: '42',
+      GITHUB_APP_NAME: 'example-leverframe-app',
+      REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
+      DEVELOPMENT_REPOSITORY: 'not-a-repository',
+    };
+    expect(() => loadServerConfig(environment)).toThrow();
+    expect(() =>
+      loadServerConfig({
+        ...environment,
+        DEVELOPMENT_REPOSITORY: 'nbsp1221/leverframe',
+        DEVELOPMENT_VERIFICATION_COMMAND: '   ',
+      }),
+    ).toThrow();
+  });
+
   it('rejects unsupported reasoning effort instead of silently falling back', () => {
     expect(() =>
       loadServerConfig({

@@ -40,6 +40,14 @@ export interface ReviewPublicationResult {
   reviewId: number;
 }
 
+export interface RepositoryDetails {
+  cloneUrl: string;
+  defaultBranch: string;
+  defaultBranchSha: string;
+  installationId: number;
+  repositoryId: number;
+}
+
 export type CheckConclusion = 'cancelled' | 'failure' | 'neutral' | 'success' | 'timed_out';
 
 export interface CheckOutput {
@@ -55,6 +63,48 @@ export class GitHubAppClient {
       appId: credentials.appId,
       privateKey: credentials.privateKey,
     });
+  }
+
+  async getRepository(input: {
+    allowedOwnerId: number;
+    repository: string;
+  }): Promise<RepositoryDetails> {
+    const [owner, repository] = splitRepository(input.repository);
+    const installations = await this.#app.octokit.request('GET /app/installations', {
+      per_page: 100,
+    });
+    const candidates = installations.data.filter(
+      (installation) => installation.account?.id === input.allowedOwnerId,
+    );
+    for (const installation of candidates) {
+      const octokit = await this.#app.getInstallationOctokit(installation.id);
+      try {
+        const response = await this.#withRetry(() =>
+          octokit.request('GET /repos/{owner}/{repo}', { owner, repo: repository }),
+        );
+        const branch = await this.#withRetry(() =>
+          octokit.request('GET /repos/{owner}/{repo}/branches/{branch}', {
+            owner,
+            repo: repository,
+            branch: response.data.default_branch,
+          }),
+        );
+        return {
+          cloneUrl: response.data.clone_url,
+          defaultBranch: response.data.default_branch,
+          defaultBranchSha: branch.data.commit.sha,
+          installationId: Number(installation.id),
+          repositoryId: Number(response.data.id),
+        };
+      } catch (error) {
+        if (githubErrorStatus(error) !== 404) {
+          throw error;
+        }
+      }
+    }
+    throw new Error(
+      `configured repository ${input.repository} is not accessible to the GitHub App`,
+    );
   }
 
   async getPullRequest(input: {

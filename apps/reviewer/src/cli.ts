@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { type CAC, cac } from 'cac';
 import { loadServerConfig } from './app/config.js';
 import { createLeverframeServer } from './app/server.js';
+import { DevelopmentController } from './development/controller.js';
 import { ExecutionTraceStore } from './execution/trace.js';
 import { GitHubAppClient } from './github/client.js';
 import { CredentialStore } from './github/credentials.js';
@@ -10,6 +11,7 @@ import { ManualCommandHandler } from './jobs/command-handler.js';
 import { JobDatabase } from './jobs/database.js';
 import { ThreadSideEffectWorker } from './jobs/thread-side-effect-worker.js';
 import { ReviewWorker } from './jobs/worker.js';
+import { DevelopmentSandboxManager } from './sandbox/development.js';
 import { recoverOrphanSandboxes } from './sandbox/recovery.js';
 import { SandboxReviewer } from './sandbox/reviewer.js';
 import { preflightSandboxRuntime, sandboxRuntimeAvailable } from './sandbox/runtime.js';
@@ -71,8 +73,9 @@ export function run(args: readonly string[], startServer: () => void = serve): n
 function serve(): void {
   const config = loadServerConfig();
   const credentials = new CredentialStore(config.credentialsDirectory);
+  const dataRoot = config.jobsDirectory.replace(/[/\\]jobs$/, '');
   const database = new JobDatabase(config.databasePath, {
-    dataRoot: config.jobsDirectory.replace(/[/\\]jobs$/, ''),
+    dataRoot,
   });
   const traceStore = new ExecutionTraceStore(config.jobsDirectory);
   const worker = new ReviewWorker({
@@ -90,6 +93,23 @@ function serve(): void {
   });
   const threadWorker = new ThreadSideEffectWorker({ credentials, database });
   const commandHandler = new ManualCommandHandler({ credentials, database, worker });
+  const github = new GitHubAppClient(credentials.read());
+  const developmentController =
+    config.development === undefined
+      ? undefined
+      : new DevelopmentController({
+          allowedOwnerId: config.allowedOwnerId,
+          database: database.development,
+          github,
+          model: config.model,
+          sandbox: new DevelopmentSandboxManager({
+            dataDirectory: dataRoot,
+            sandboxTemplate: config.sandboxTemplate,
+            commitSkillDirectory: config.development.commitSkillDirectory,
+          }),
+          verificationCommand: config.development.verificationCommand,
+          workerId: `leverframe-${process.pid}`,
+        });
   const server = createLeverframeServer(
     config,
     database,
@@ -100,8 +120,19 @@ function serve(): void {
       onJobQueued: (job) => worker.cancelSuperseded(job),
       onManualCommand: (command) => commandHandler.handle(command),
       onPullRequestCancelled: (cancellation) => worker.cancelPullRequest(cancellation),
-      getFindingContext: (input) =>
-        new GitHubAppClient(credentials.read()).getFindingContext(input),
+      getFindingContext: (input) => github.getFindingContext(input),
+      ...(developmentController === undefined
+        ? {}
+        : {
+            onDevelopmentRunCreated: (runId: number) => {
+              void developmentController.startPlanning(runId);
+            },
+            onDevelopmentPlanApproval: (
+              input: Parameters<DevelopmentController['approvePlan']>[0],
+            ) => {
+              void developmentController.approvePlan(input);
+            },
+          }),
     },
     traceStore,
   );

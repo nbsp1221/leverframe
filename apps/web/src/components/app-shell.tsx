@@ -29,7 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@repo/ui/components/tooltip';
-import { MoonIcon, SunIcon } from 'lucide-react';
+import { BotIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
@@ -112,6 +112,15 @@ function AppSidebar() {
                     aria-hidden="true"
                   />
                   <span>{t('codeReviewBot')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={pathname.includes('/development')}
+                  render={<Link href="/development" />}
+                >
+                  <BotIcon aria-hidden="true" />
+                  <span>{t('development')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

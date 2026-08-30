@@ -13,6 +13,7 @@ import type { CredentialStore } from '../github/credentials.js';
 import type { JobDatabase } from '../jobs/database.js';
 import { ExecutionTraceStore } from '../execution/trace.js';
 import type { ServerConfig } from './config.js';
+import { registerDevelopmentRoutes } from './routes/development.js';
 import { registerGitHubRoutes } from './routes/github.js';
 import { registerReviewExecutionRoutes } from './routes/review-execution.js';
 import { registerReviewRoutes } from './routes/reviews.js';
@@ -99,6 +100,7 @@ function createApi(
   };
 
   registerGitHubRoutes(app, config, database, credentials, hooks, observed);
+  registerDevelopmentRoutes(app, database, hooks, config.development?.repository);
   registerReviewRoutes(app, database, hooks, observations, recordRead);
   registerReviewExecutionRoutes(app, database, traceStore, recordRead);
 

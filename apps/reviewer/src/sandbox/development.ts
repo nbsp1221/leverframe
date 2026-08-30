@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { developmentProtocol, developmentSandboxName } from '../identity.js';
@@ -95,6 +96,77 @@ export class DevelopmentSandboxManager {
     await runProcess('sbx', ['stop', developmentSandboxName(runId)], {
       timeoutMilliseconds: 2 * 60 * 1000,
     });
+  }
+
+  async candidateIdentity(runId: number): Promise<{
+    hash: string;
+    headSha: string;
+    dirty: boolean;
+  }> {
+    const paths = this.paths(runId, false);
+    const name = developmentSandboxName(runId);
+
+    const git = async (arguments_: readonly string[]) =>
+      runProcess('sbx', ['exec', '-w', paths.workspaceDirectory, name, 'git', ...arguments_]);
+
+    const [head, status, unstaged, staged, submodules, untracked] = await Promise.all([
+      git(['rev-parse', 'HEAD']),
+      git(['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all']),
+      git(['diff', '--binary', '--no-ext-diff']),
+      git(['diff', '--cached', '--binary', '--no-ext-diff']),
+      git(['submodule', 'status', '--recursive']),
+      runProcess('sbx', [
+        'exec',
+        '-w',
+        paths.workspaceDirectory,
+        name,
+        'sh',
+        '-ceu',
+        'git ls-files --others --exclude-standard -z | sort -z | xargs -0 -r sha256sum --zero',
+      ]),
+    ]);
+    const parsed = parseWorkspaceStatus(status.stdout.replaceAll('\0', '\n'));
+    const hash = createHash('sha256')
+      .update('leverframe-candidate-v1\0')
+      .update(head.stdout.trim())
+      .update('\0')
+      .update(status.stdout)
+      .update('\0')
+      .update(unstaged.stdout)
+      .update('\0')
+      .update(staged.stdout)
+      .update('\0')
+      .update(submodules.stdout)
+      .update('\0')
+      .update(untracked.stdout)
+      .digest('hex');
+    return { hash, headSha: head.stdout.trim(), dirty: parsed.dirty };
+  }
+
+  async runVerification(
+    runId: number,
+    command: string,
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+  }> {
+    if (command.trim() === '' || command.length > 2000) {
+      throw new Error('development verification command is invalid');
+    }
+    const paths = this.paths(runId, false);
+    return runProcess(
+      'sbx',
+      [
+        'exec',
+        '-w',
+        paths.workspaceDirectory,
+        developmentSandboxName(runId),
+        'sh',
+        '-ceu',
+        command,
+      ],
+      { timeoutMilliseconds: 30 * 60 * 1000 },
+    );
   }
 
   async cleanup(input: {
