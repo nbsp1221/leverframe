@@ -162,6 +162,95 @@ describe('development API', () => {
     });
   });
 
+  it('renders and accepts the current clarification questions without exposing secrets', async () => {
+    const onDevelopmentClarificationAnswer = vi.fn();
+    const { database, url } = await fixture({
+      configured: true,
+      hooks: { onDevelopmentClarificationAnswer },
+    });
+    let run = database.development.createRun({ repository: 'owner/repo', goal: 'Clarify it.' });
+    run = database.development.transition({
+      id: run.id,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'PREPARING',
+      event: { type: 'preparing', source: 'LEVERFRAME', trust: 'SYSTEM_OBSERVED' },
+    });
+    run = database.development.transition({
+      id: run.id,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'PLANNING',
+      event: { type: 'planning', source: 'LEVERFRAME', trust: 'SYSTEM_OBSERVED' },
+    });
+    const attempt = database.development.claimAttempt({
+      runId: run.id,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'PLANNING',
+      executorKind: 'CODEX_APP_SERVER',
+      leaseOwner: 'test-worker',
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    database.development.attachAttemptRuntime({
+      id: attempt.id,
+      generation: run.generation,
+      leaseOwner: 'test-worker',
+      threadId: '01990ef4-4c57-7000-8000-000000000001',
+      turnId: '01990ef4-4c57-7000-8000-000000000002',
+    });
+    run = database.development.requireRun(run.id);
+    database.development.requestClarification({
+      runId: run.id,
+      attemptId: attempt.id,
+      workRevisionId: run.workRevisionId,
+      generation: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'PLANNING',
+      requestId: 'request-1',
+      threadId: '01990ef4-4c57-7000-8000-000000000001',
+      turnId: '01990ef4-4c57-7000-8000-000000000002',
+      prompt: 'Scope: Which surface?',
+      questions: [
+        {
+          id: 'scope',
+          header: 'Scope',
+          question: 'Which surface?',
+          isOther: true,
+          options: [{ label: 'Web', description: 'Dashboard only.' }],
+        },
+      ],
+    });
+    const detail = developmentRunDetailSchema.parse(
+      await (await fetch(`${url}/api/v1/development/runs/${run.id}`)).json(),
+    );
+    expect(detail.interrupt).toMatchObject({
+      kind: 'clarification',
+      questions: [{ id: 'scope', is_other: true }],
+    });
+    expect(JSON.stringify(detail.interrupt)).not.toMatch(/request-1|01990ef4|is_secret/i);
+    if (detail.interrupt === null) {
+      throw new Error('fixture clarification missing');
+    }
+
+    const response = await fetch(`${url}/api/v1/development/runs/${run.id}/clarification-answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        interrupt_id: detail.interrupt.id,
+        expected_lock_version: detail.interrupt.lock_version,
+        answers: { scope: ['Web'] },
+      }),
+    });
+    expect(response.status).toBe(202);
+    expect(onDevelopmentClarificationAnswer).toHaveBeenCalledWith({
+      runId: run.id,
+      interruptId: detail.interrupt.id,
+      interruptLockVersion: detail.interrupt.lock_version,
+      answers: { scope: ['Web'] },
+    });
+  });
+
   it('replays normalized events through a terminal resumable stream', async () => {
     const { database, url } = await fixture();
     const run = database.development.createRun({ repository: 'owner/repo', goal: 'Observe it.' });

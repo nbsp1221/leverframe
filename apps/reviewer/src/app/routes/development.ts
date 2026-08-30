@@ -1,6 +1,7 @@
 import type { ZodType } from 'zod';
 import { type OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import {
+  developmentClarificationAnswerSchema,
   developmentEventSchema,
   developmentEvidenceSchema,
   developmentInterruptSchema,
@@ -89,6 +90,27 @@ const approvePlanRoute = createRoute({
     202: jsonResponse(developmentRunSummarySchema, 'The decision was accepted.'),
     404: jsonResponse(errorResponseSchema, 'The run was not found.'),
     409: jsonResponse(errorResponseSchema, 'The decision or run revision is stale.'),
+    422: jsonResponse(errorResponseSchema, 'The request is invalid.'),
+  },
+});
+
+const answerClarificationRoute = createRoute({
+  method: 'post',
+  path: '/api/v1/development/runs/{runId}/clarification-answer',
+  operationId: 'answerDevelopmentClarification',
+  tags: ['Development'],
+  summary: 'Answer the current material clarification request',
+  request: {
+    params: developmentRunIdParamsSchema,
+    body: {
+      required: true,
+      content: { 'application/json': { schema: developmentClarificationAnswerSchema } },
+    },
+  },
+  responses: {
+    202: jsonResponse(developmentRunSummarySchema, 'The answers were accepted.'),
+    404: jsonResponse(errorResponseSchema, 'The run was not found.'),
+    409: jsonResponse(errorResponseSchema, 'The request or run revision is stale.'),
     422: jsonResponse(errorResponseSchema, 'The request is invalid.'),
   },
 });
@@ -182,6 +204,34 @@ export function registerDevelopmentRoutes(
       return apiError(c, 404, 'development run not found', 'NOT_FOUND');
     }
     return json(c, detail(database, run));
+  });
+  app.openapi(answerClarificationRoute, (c) => {
+    const runId = c.req.valid('param').runId;
+    if (database.development.getRun(runId) === undefined) {
+      return apiError(c, 404, 'development run not found', 'NOT_FOUND');
+    }
+    if (hooks.onDevelopmentClarificationAnswer === undefined) {
+      return apiError(c, 409, 'development runtime is not configured', 'DEVELOPMENT_UNAVAILABLE');
+    }
+    const input = c.req.valid('json');
+    try {
+      hooks.onDevelopmentClarificationAnswer({
+        runId,
+        interruptId: input.interrupt_id,
+        interruptLockVersion: input.expected_lock_version,
+        answers: input.answers,
+      });
+      return json(
+        c,
+        developmentRunSummarySchema.parse(summary(database.development.requireRun(runId))),
+        202,
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        return apiError(c, 409, error.message, 'STALE_DEVELOPMENT_STATE');
+      }
+      throw error;
+    }
   });
   app.openapi(approvePlanRoute, (c) => {
     const runId = c.req.valid('param').runId;
@@ -324,6 +374,14 @@ function detail(database: JobDatabase, run: DevelopmentRun) {
             kind: interrupt.kind.toLowerCase(),
             status: 'open',
             prompt: interrupt.prompt,
+            questions:
+              interrupt.questions?.map((question) => ({
+                id: question.id,
+                header: question.header,
+                question: question.question,
+                is_other: question.isOther,
+                options: question.options ?? null,
+              })) ?? null,
             candidate_hash: interrupt.candidateHash ?? null,
             publication_kind: interrupt.publicationKind?.toLowerCase() ?? null,
             lock_version: interrupt.lockVersion,
@@ -358,11 +416,13 @@ function summary(run: DevelopmentRun) {
     goal: run.goal,
     candidate_hash: run.candidateHash ?? null,
     operator_action:
-      phase === 'awaiting_plan_approval'
-        ? ('approve_plan' as const)
-        : phase === 'awaiting_publication_approval'
-          ? ('approve_publication' as const)
-          : null,
+      phase === 'waiting_for_input'
+        ? ('answer' as const)
+        : phase === 'awaiting_plan_approval'
+          ? ('approve_plan' as const)
+          : phase === 'awaiting_publication_approval'
+            ? ('approve_publication' as const)
+            : null,
     last_activity_at: run.lastActivityAt,
     created_at: run.createdAt,
     updated_at: run.updatedAt,

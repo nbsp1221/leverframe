@@ -405,6 +405,25 @@ export const developmentInterruptSchema = z.object({
   kind: z.enum(['clarification', 'plan_approval', 'publication_approval']),
   status: z.enum(['open', 'answered', 'approved', 'rejected', 'cancelled', 'superseded']),
   prompt: z.string(),
+  questions: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(120),
+        header: z.string().min(1).max(120),
+        question: z.string().min(1).max(2000),
+        is_other: z.boolean(),
+        options: z
+          .array(
+            z.object({
+              label: z.string().min(1).max(200),
+              description: z.string().max(1000),
+            }),
+          )
+          .nullable(),
+      }),
+    )
+    .max(3)
+    .nullable(),
   candidate_hash: z
     .string()
     .regex(/^[0-9a-f]{64}$/)
@@ -413,6 +432,14 @@ export const developmentInterruptSchema = z.object({
   lock_version: z.number().int().positive(),
   requested_at: isoDate,
   resolved_at: isoDate.nullable(),
+});
+
+export const developmentClarificationAnswerSchema = z.object({
+  interrupt_id: z.number().int().positive(),
+  expected_lock_version: z.number().int().positive(),
+  answers: z
+    .record(z.string().min(1).max(120), z.array(z.string().trim().min(1).max(4000)).min(1).max(5))
+    .refine((answers) => JSON.stringify(answers).length <= 20_000, 'answers are too large'),
 });
 
 export const developmentEvidenceSchema = z.object({
@@ -471,6 +498,9 @@ export type DevelopmentRunCreate = z.infer<typeof developmentRunCreateSchema>;
 export type DevelopmentRunSummary = z.infer<typeof developmentRunSummarySchema>;
 export type DevelopmentEvent = z.infer<typeof developmentEventSchema>;
 export type DevelopmentInterrupt = z.infer<typeof developmentInterruptSchema>;
+
+export type DevelopmentClarificationAnswer = z.infer<typeof developmentClarificationAnswerSchema>;
+
 export type DevelopmentEvidence = z.infer<typeof developmentEvidenceSchema>;
 export type DevelopmentPlanApproval = z.infer<typeof developmentPlanApprovalSchema>;
 export type DevelopmentPublicationApproval = z.infer<typeof developmentPublicationApprovalSchema>;

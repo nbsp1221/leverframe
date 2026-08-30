@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AppServerNotification, CodexAppServer } from '../../../src/codex/app-server.js';
+import type {
+  AppServerNotification,
+  AppServerRequest,
+  CodexAppServer,
+} from '../../../src/codex/app-server.js';
 import type { GitHubAppClient } from '../../../src/github/client.js';
 import type { DevelopmentSandboxManager } from '../../../src/sandbox/development.js';
 import { DevelopmentController } from '../../../src/development/controller.js';
@@ -7,7 +11,7 @@ import { openDatabase } from '../../../src/storage/connection.js';
 import { DevelopmentRepository } from '../../../src/storage/development-repository.js';
 import { runMigrations } from '../../../src/storage/migrations/index.js';
 
-function setup(input: { prepareFailure?: Error } = {}) {
+function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error } = {}) {
   const database = openDatabase(':memory:');
   runMigrations(database);
   const repository = new DevelopmentRepository(database);
@@ -61,16 +65,43 @@ function setup(input: { prepareFailure?: Error } = {}) {
     disablePublication,
   } as unknown as DevelopmentSandboxManager;
   let onNotification: ((notification: AppServerNotification) => void) | undefined;
+  let onRequest: ((request: AppServerRequest) => Promise<unknown>) | undefined;
+  let clarificationResponse: unknown;
   const close = vi.fn();
   const startTurn = vi.fn().mockImplementation(() => {
-    queueMicrotask(() => {
-      onNotification?.({
-        method: 'item/completed',
-        params: { item: { id: 'message-1', type: 'agentMessage', text: 'A bounded plan.' } },
-      });
-      onNotification?.({ method: 'turn/completed', params: {} });
-    });
-    return Promise.resolve('01990ef4-4c57-7000-8000-000000000002');
+    const turnId = '01990ef4-4c57-7000-8000-000000000002';
+    setTimeout(() => {
+      void (async () => {
+        if (input.clarifyDuringPlanning === true && startTurn.mock.calls.length === 1) {
+          clarificationResponse = await onRequest?.({
+            id: 'clarification-1',
+            method: 'item/tool/requestUserInput',
+            params: {
+              threadId: '01990ef4-4c57-7000-8000-000000000001',
+              turnId,
+              itemId: 'item-1',
+              isBlocking: true,
+              questions: [
+                {
+                  id: 'scope',
+                  header: 'Scope',
+                  question: 'Which surface should change?',
+                  isOther: true,
+                  isSecret: false,
+                  options: [{ label: 'Web', description: 'Change the dashboard.' }],
+                },
+              ],
+            },
+          });
+        }
+        onNotification?.({
+          method: 'item/completed',
+          params: { item: { id: 'message-1', type: 'agentMessage', text: 'A bounded plan.' } },
+        });
+        onNotification?.({ method: 'turn/completed', params: {} });
+      })();
+    }, 0);
+    return Promise.resolve(turnId);
   });
   const appServer = {
     setSkillRoots: vi.fn().mockResolvedValue(undefined),
@@ -87,6 +118,7 @@ function setup(input: { prepareFailure?: Error } = {}) {
     ConstructorParameters<typeof DevelopmentController>[0]['launchAppServer']
   > = vi.fn().mockImplementation((options: Parameters<typeof CodexAppServer.launch>[0]) => {
     onNotification = options.onNotification;
+    onRequest = options.onRequest;
     return Promise.resolve(appServer);
   });
   const controller = new DevelopmentController({
@@ -101,6 +133,7 @@ function setup(input: { prepareFailure?: Error } = {}) {
   });
   return {
     close,
+    getClarificationResponse: () => clarificationResponse,
     controller,
     database,
     disablePublication,
@@ -130,6 +163,52 @@ describe('DevelopmentController planning', () => {
     expect(context.close).toHaveBeenCalledOnce();
     expect(context.stop).toHaveBeenCalledWith(context.run.id);
     expect(context.controller.activeRuns).toEqual([]);
+    context.database.close();
+  });
+
+  it('persists and answers a material clarification inside the active planning turn', async () => {
+    const context = setup({ clarifyDuringPlanning: true });
+    const completion = context.controller.startPlanning(context.run.id);
+    await vi.waitFor(() => {
+      expect(context.repository.requireRun(context.run.id).phase).toBe('WAITING_FOR_INPUT');
+    });
+    const clarification = context.repository.getOpenInterrupt(context.run.id);
+    expect(clarification).toMatchObject({
+      kind: 'CLARIFICATION',
+      questions: [{ id: 'scope', question: 'Which surface should change?' }],
+    });
+    if (clarification === undefined) {
+      throw new Error('clarification was not created');
+    }
+
+    expect(() =>
+      context.controller.answerClarification({
+        runId: context.run.id,
+        interruptId: clarification.id,
+        interruptLockVersion: clarification.lockVersion,
+        answers: { different: ['Web'] },
+      }),
+    ).toThrow('do not match');
+    expect(context.repository.requireRun(context.run.id).phase).toBe('WAITING_FOR_INPUT');
+
+    context.controller.answerClarification({
+      runId: context.run.id,
+      interruptId: clarification.id,
+      interruptLockVersion: clarification.lockVersion,
+      answers: { scope: ['Web'] },
+    });
+    await completion;
+
+    expect(context.getClarificationResponse()).toEqual({
+      answers: { scope: { answers: ['Web'] } },
+    });
+    expect(context.repository.requireRun(context.run.id).phase).toBe('AWAITING_PLAN_APPROVAL');
+    expect(
+      context.repository
+        .listEvents(context.run.id)
+        .map((event) => event.type)
+        .filter((type) => type.startsWith('clarification_')),
+    ).toEqual(['clarification_required', 'clarification_answered']);
     context.database.close();
   });
 

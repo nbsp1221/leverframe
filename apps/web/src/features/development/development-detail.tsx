@@ -1,6 +1,6 @@
 'use client';
 
-import type { DevelopmentRunDetail } from '@repo/contracts';
+import type { DevelopmentInterrupt, DevelopmentRunDetail } from '@repo/contracts';
 import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
 import { Badge } from '@repo/ui/components/badge';
 import { Button } from '@repo/ui/components/button';
@@ -162,7 +162,7 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
           ))}
         </CardContent>
       </Card>
-      {detail.interrupt?.kind === 'plan_approval' ? (
+      {detail.interrupt?.kind === 'plan_approval' || detail.interrupt?.kind === 'clarification' ? (
         <Alert>
           <CircleAlertIcon />
           <AlertTitle>{t('actionRequired')}</AlertTitle>
@@ -193,6 +193,12 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
           </CardContent>
         </Card>
         <div className="flex flex-col gap-6">
+          {detail.interrupt?.kind === 'clarification' && detail.interrupt.questions !== null ? (
+            <ClarificationCard
+              interrupt={{ ...detail.interrupt, questions: detail.interrupt.questions }}
+              runId={detail.run.id}
+            />
+          ) : null}
           {detail.interrupt?.kind === 'plan_approval' ? (
             <Card>
               <CardHeader>
@@ -278,5 +284,98 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
         </div>
       </div>
     </div>
+  );
+}
+
+function ClarificationCard({
+  interrupt,
+  runId,
+}: {
+  interrupt: Pick<DevelopmentInterrupt, 'id' | 'lock_version'> & {
+    questions: NonNullable<DevelopmentInterrupt['questions']>;
+  };
+  runId: number;
+}) {
+  const t = useTranslations('development');
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
+
+  async function answer(formData: FormData) {
+    const answers = Object.fromEntries(
+      interrupt.questions.map((question) => {
+        const value = formData.get(`question:${question.id}`);
+        return [question.id, [typeof value === 'string' ? value.trim() : '']];
+      }),
+    );
+    if (Object.values(answers).some(([value]) => value === '')) {
+      setError(t('answerRequired'));
+      return;
+    }
+    setPending(true);
+    setError(undefined);
+    const response = await fetch(`/api/v1/development/runs/${runId}/clarification-answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        interrupt_id: interrupt.id,
+        expected_lock_version: interrupt.lock_version,
+        answers,
+      }),
+    });
+    if (!response.ok) {
+      setError(t('answerFailed'));
+      setPending(false);
+      router.refresh();
+      return;
+    }
+    router.refresh();
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('clarification')}</CardTitle>
+        <CardDescription>{t('clarificationDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form action={answer}>
+          <FieldGroup>
+            {interrupt.questions.map((question) => (
+              <Field key={question.id}>
+                <FieldLabel htmlFor={`question-${question.id}`}>{question.header}</FieldLabel>
+                <FieldDescription>{question.question}</FieldDescription>
+                {question.options === null ? null : (
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                    {question.options.map((option) => (
+                      <li key={option.label}>
+                        <strong className="text-foreground">{option.label}</strong>
+                        {option.description === '' ? null : ` — ${option.description}`}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Textarea
+                  id={`question-${question.id}`}
+                  name={`question:${question.id}`}
+                  rows={3}
+                  maxLength={4000}
+                  required
+                />
+              </Field>
+            ))}
+            {error ? (
+              <Alert variant="destructive">
+                <AlertTitle>{error}</AlertTitle>
+              </Alert>
+            ) : null}
+            <Button type="submit" disabled={pending}>
+              {pending ? <Spinner data-icon="inline-start" /> : null}
+              {t('sendAnswers')}
+            </Button>
+          </FieldGroup>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

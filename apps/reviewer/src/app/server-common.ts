@@ -32,6 +32,12 @@ export interface ServerHooks {
   onManualCommand?: (command: ManualCommand) => Promise<{ status: string }>;
   onPullRequestCancelled?: (cancellation: PullRequestCancellationInput) => void;
   onDevelopmentRunCreated?: (runId: number) => void;
+  onDevelopmentClarificationAnswer?: (input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    answers: Record<string, string[]>;
+  }) => void;
   onDevelopmentPlanApproval?: (input: {
     runId: number;
     interruptId: number;

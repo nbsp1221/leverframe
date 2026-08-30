@@ -1,27 +1,22 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { transaction } from './connection.js';
 import {
+  type DevelopmentClarificationQuestion,
+  type RequestClarificationInput,
+  type ResolveClarificationInput,
+  parseClarificationContext,
+  requestClarification,
+  resolveClarification,
+} from './development-clarification-repository.js';
+import {
   type DevelopmentAttemptRow,
   type DevelopmentRunRow,
   mapDevelopmentAttempt,
   mapDevelopmentRun,
 } from './development-mappers.js';
+import { type DevelopmentPhase, developmentPhaseTransitions } from './development-phases.js';
 
-export type DevelopmentPhase =
-  | 'INTAKE'
-  | 'PREPARING'
-  | 'PLANNING'
-  | 'AWAITING_PLAN_APPROVAL'
-  | 'IMPLEMENTING'
-  | 'VERIFYING'
-  | 'AWAITING_PUBLICATION_APPROVAL'
-  | 'PUBLISHING'
-  | 'REVIEWING'
-  | 'AWAITING_MERGE'
-  | 'WAITING_FOR_INPUT'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'CANCELLED';
+export type { DevelopmentPhase } from './development-phases.js';
 
 export interface DevelopmentRun {
   id: number;
@@ -64,29 +59,6 @@ export interface DevelopmentAttempt {
 }
 
 export class DevelopmentConflictError extends Error {}
-
-const phaseTransitions: Readonly<Record<DevelopmentPhase, readonly DevelopmentPhase[]>> = {
-  INTAKE: ['PREPARING', 'FAILED', 'CANCELLED'],
-  PREPARING: ['PLANNING', 'WAITING_FOR_INPUT', 'FAILED', 'CANCELLED'],
-  PLANNING: ['AWAITING_PLAN_APPROVAL', 'WAITING_FOR_INPUT', 'FAILED', 'CANCELLED'],
-  AWAITING_PLAN_APPROVAL: ['IMPLEMENTING', 'PLANNING', 'FAILED', 'CANCELLED'],
-  IMPLEMENTING: ['VERIFYING', 'WAITING_FOR_INPUT', 'FAILED', 'CANCELLED'],
-  VERIFYING: [
-    'AWAITING_PUBLICATION_APPROVAL',
-    'IMPLEMENTING',
-    'WAITING_FOR_INPUT',
-    'FAILED',
-    'CANCELLED',
-  ],
-  AWAITING_PUBLICATION_APPROVAL: ['PUBLISHING', 'IMPLEMENTING', 'FAILED', 'CANCELLED'],
-  PUBLISHING: ['REVIEWING', 'AWAITING_PUBLICATION_APPROVAL', 'FAILED', 'CANCELLED'],
-  REVIEWING: ['AWAITING_MERGE', 'IMPLEMENTING', 'WAITING_FOR_INPUT', 'FAILED', 'CANCELLED'],
-  AWAITING_MERGE: ['COMPLETED', 'IMPLEMENTING', 'FAILED', 'CANCELLED'],
-  WAITING_FOR_INPUT: [],
-  COMPLETED: [],
-  FAILED: [],
-  CANCELLED: [],
-};
 
 export class DevelopmentRepository {
   constructor(private readonly database: DatabaseSync) {}
@@ -594,6 +566,23 @@ export class DevelopmentRepository {
     );
   }
 
+  requestClarification(input: RequestClarificationInput): number {
+    return requestClarification(this.database, input, {
+      conflict: (message) => new DevelopmentConflictError(message),
+      requireRun: (id) => this.requireRun(id),
+      requireAttempt: (id) => this.requireAttempt(id),
+      transition: (transitionInput) => this.transitionWithinTransaction(transitionInput),
+    });
+  }
+
+  resolveClarification(input: ResolveClarificationInput): DevelopmentRun {
+    return resolveClarification(this.database, input, {
+      conflict: (message) => new DevelopmentConflictError(message),
+      requireRun: (id) => this.requireRun(id),
+      transition: (transitionInput) => this.transitionWithinTransaction(transitionInput),
+    });
+  }
+
   requestPlanApproval(input: {
     runId: number;
     expectedGeneration: number;
@@ -660,11 +649,12 @@ export class DevelopmentRepository {
         candidateHash?: string;
         publicationKind?: 'PUSH_AND_PR' | 'PUSH_EXISTING';
         requestedAt: string;
+        questions?: DevelopmentClarificationQuestion[];
       }
     | undefined {
     const row = this.database
       .prepare(`
-        SELECT id, kind, prompt, lock_version, candidate_hash, publication_kind, requested_at
+        SELECT id, kind, prompt, context_json, lock_version, candidate_hash, publication_kind, requested_at
         FROM development_interrupts WHERE run_id = ? AND status = 'OPEN'
       `)
       .get(runId) as
@@ -672,6 +662,7 @@ export class DevelopmentRepository {
           id: number;
           kind: 'CLARIFICATION' | 'PLAN_APPROVAL' | 'PUBLICATION_APPROVAL';
           prompt: string;
+          context_json: string;
           lock_version: number;
           candidate_hash: string | null;
           publication_kind: 'PUSH_AND_PR' | 'PUSH_EXISTING' | null;
@@ -686,6 +677,9 @@ export class DevelopmentRepository {
           prompt: row.prompt,
           lockVersion: Number(row.lock_version),
           requestedAt: row.requested_at,
+          ...(row.kind === 'CLARIFICATION'
+            ? { questions: parseClarificationContext(row.context_json).questions }
+            : {}),
           ...(row.candidate_hash === null ? {} : { candidateHash: row.candidate_hash }),
           ...(row.publication_kind === null ? {} : { publicationKind: row.publication_kind }),
         };
@@ -869,7 +863,7 @@ export class DevelopmentRepository {
     const current = this.requireRun(input.id);
     const isWaitingResume =
       current.phase === 'WAITING_FOR_INPUT' && current.priorPhase === input.phase;
-    if (!isWaitingResume && !phaseTransitions[current.phase].includes(input.phase)) {
+    if (!isWaitingResume && !developmentPhaseTransitions[current.phase].includes(input.phase)) {
       throw new DevelopmentConflictError(
         `illegal development transition ${current.phase} -> ${input.phase}`,
       );

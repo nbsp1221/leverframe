@@ -228,6 +228,8 @@ export class CodexAppServer {
         input.workspaceDirectory,
         input.sandboxName,
         'codex',
+        '--enable',
+        'default_mode_request_user_input',
         'app-server',
         '--stdio',
       ],

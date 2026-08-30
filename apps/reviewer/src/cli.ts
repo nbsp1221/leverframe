@@ -128,6 +128,11 @@ function serve(): void {
             onDevelopmentRunCreated: (runId: number) => {
               void developmentController.startPlanning(runId);
             },
+            onDevelopmentClarificationAnswer: (
+              input: Parameters<DevelopmentController['answerClarification']>[0],
+            ) => {
+              developmentController.answerClarification(input);
+            },
             onDevelopmentPlanApproval: (
               input: Parameters<DevelopmentController['approvePlan']>[0],
             ) => {
@@ -151,9 +156,8 @@ function serve(): void {
     }
     shuttingDown = true;
 
-    // Stop accepting new requests first. Existing requests are allowed to
-    // drain while the worker aborts and requeues active jobs; only then is it
-    // safe to close SQLite.
+    // Stop accepting new requests first. SSE streams can remain open for an
+    // entire run, so close active connections after workers have stopped.
     const serverClosed = new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error !== undefined) {
@@ -165,7 +169,8 @@ function serve(): void {
     });
     void (async () => {
       try {
-        await Promise.all([worker.stop(), threadWorker.stop()]);
+        await Promise.all([worker.stop(), threadWorker.stop(), developmentController?.stop()]);
+        server.closeAllConnections();
         await serverClosed;
         database.close();
         process.exitCode = 0;

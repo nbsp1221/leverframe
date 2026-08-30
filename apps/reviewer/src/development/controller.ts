@@ -1,4 +1,5 @@
-import type { AppServerNotification } from '../codex/app-server.js';
+import { z } from 'zod';
+import type { AppServerNotification, AppServerRequest } from '../codex/app-server.js';
 import type { GitHubAppClient } from '../github/client.js';
 import type { DevelopmentSandboxManager } from '../sandbox/development.js';
 import type {
@@ -14,6 +15,15 @@ const turnTimeoutMilliseconds = 30 * 60 * 1000;
 
 export class DevelopmentController {
   readonly #active = new Map<number, { abort: AbortController; completion: Promise<void> }>();
+  readonly #servers = new Map<number, CodexAppServer>();
+  readonly #clarifications = new Map<
+    number,
+    {
+      interruptId: number;
+      reject: (error: Error) => void;
+      resolve: (response: unknown) => void;
+    }
+  >();
 
   constructor(
     readonly options: {
@@ -49,6 +59,16 @@ export class DevelopmentController {
 
   cancel(runId: number): void {
     this.#active.get(runId)?.abort.abort();
+  }
+
+  async stop(): Promise<void> {
+    for (const active of this.#active.values()) {
+      active.abort.abort();
+    }
+    for (const server of this.#servers.values()) {
+      server.close();
+    }
+    await Promise.allSettled([...this.#active.values()].map((active) => active.completion));
   }
 
   approvePlan(input: {
@@ -141,6 +161,31 @@ export class DevelopmentController {
     return completion;
   }
 
+  answerClarification(input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    answers: Record<string, string[]>;
+  }): void {
+    const pending = this.#clarifications.get(input.runId);
+    if (pending === undefined || pending.interruptId !== input.interruptId) {
+      throw new DevelopmentControllerConflictError(
+        `development run ${input.runId} has no live clarification request`,
+      );
+    }
+    this.options.database.resolveClarification({
+      runId: input.runId,
+      interruptId: input.interruptId,
+      expectedLockVersion: input.interruptLockVersion,
+      answers: input.answers,
+    });
+    pending.resolve({
+      answers: Object.fromEntries(
+        Object.entries(input.answers).map(([id, answers]) => [id, { answers }]),
+      ),
+    });
+  }
+
   private async plan(runId: number, signal: AbortSignal): Promise<void> {
     let run = this.options.database.requireRun(runId);
     const repository = await this.options.github.getRepository({
@@ -201,12 +246,9 @@ export class DevelopmentController {
           }
         },
         onRequest: (request) =>
-          Promise.reject(
-            new Error(
-              `durable handling is not yet available for App Server request ${request.method}`,
-            ),
-          ),
+          this.handleClarification(run.id, run.generation, planning.id, 'PLANNING', request),
       });
+      this.#servers.set(run.id, server);
       await server.setSkillRoots([sandbox.skillsDirectory]);
       const commitSkill = (await server.listSkills(sandbox.workspaceDirectory)).find(
         (skill) => skill.name === 'commit' && skill.enabled,
@@ -236,7 +278,12 @@ export class DevelopmentController {
         threadId,
         turnId,
       });
-      await withTimeout(completed.promise, turnTimeoutMilliseconds, 'planning turn timed out');
+      await withTimeout(
+        completed.promise,
+        turnTimeoutMilliseconds,
+        'planning turn timed out',
+        signal,
+      );
       this.options.database.completeAttempt({
         id: planning.id,
         runId: run.id,
@@ -254,12 +301,13 @@ export class DevelopmentController {
         prompt: 'Approve this implementation plan?',
       });
     } finally {
+      this.#servers.delete(run.id);
       server?.close();
       await this.options.sandbox.stop(run.id).catch(() => undefined);
     }
   }
 
-  private async implement(runId: number, _signal: AbortSignal): Promise<void> {
+  private async implement(runId: number, signal: AbortSignal): Promise<void> {
     let run = this.options.database.requireRun(runId);
     const attempt = this.options.database.claimAttempt({
       runId,
@@ -289,12 +337,9 @@ export class DevelopmentController {
           }
         },
         onRequest: (request) =>
-          Promise.reject(
-            new Error(
-              `durable handling is not yet available for App Server request ${request.method}`,
-            ),
-          ),
+          this.handleClarification(run.id, run.generation, attempt.id, 'IMPLEMENTING', request),
       });
+      this.#servers.set(run.id, server);
       await server.setSkillRoots([paths.skillsDirectory]);
       const commitSkill = (await server.listSkills(paths.workspaceDirectory)).find(
         (skill) => skill.name === 'commit' && skill.enabled,
@@ -320,6 +365,7 @@ export class DevelopmentController {
         completed.promise,
         turnTimeoutMilliseconds,
         'implementation turn timed out',
+        signal,
       );
       this.options.database.completeAttempt({
         id: attempt.id,
@@ -330,6 +376,7 @@ export class DevelopmentController {
         outcomeCode: 'IMPLEMENTATION_COMPLETED',
       });
     } finally {
+      this.#servers.delete(run.id);
       server?.close();
     }
 
@@ -448,7 +495,7 @@ export class DevelopmentController {
   private async publish(
     runId: number,
     approvedCandidateHash: string,
-    _signal: AbortSignal,
+    signal: AbortSignal,
   ): Promise<void> {
     let run = this.options.database.requireRun(runId);
     const attempt = this.options.database.claimAttempt({
@@ -487,6 +534,7 @@ export class DevelopmentController {
         onRequest: (request) =>
           Promise.reject(new Error(`publication request ${request.method} is not authorized`)),
       });
+      this.#servers.set(run.id, server);
       await server.setSkillRoots([paths.skillsDirectory]);
       const createPrSkill = (await server.listSkills(paths.workspaceDirectory)).find(
         (skill) => skill.name === 'create-pr' && skill.enabled,
@@ -507,7 +555,12 @@ export class DevelopmentController {
         threadId,
         turnId,
       });
-      await withTimeout(completed.promise, turnTimeoutMilliseconds, 'publication turn timed out');
+      await withTimeout(
+        completed.promise,
+        turnTimeoutMilliseconds,
+        'publication turn timed out',
+        signal,
+      );
       const candidate = await this.options.sandbox.candidateIdentity(runId);
       if (candidate.hash !== approvedCandidateHash || candidate.dirty) {
         throw new Error('publication turn changed the approved candidate');
@@ -545,6 +598,7 @@ export class DevelopmentController {
         event: observed('review_wait_started', { pull_request: pullRequest.number }),
       });
     } finally {
+      this.#servers.delete(run.id);
       server?.close();
       await this.options.sandbox.disablePublication(runId).catch(() => undefined);
       await this.options.sandbox.stop(runId).catch(() => undefined);
@@ -567,6 +621,65 @@ export class DevelopmentController {
     });
   }
 
+  private async handleClarification(
+    runId: number,
+    generation: number,
+    attemptId: number,
+    phase: 'PLANNING' | 'IMPLEMENTING',
+    request: AppServerRequest,
+  ): Promise<unknown> {
+    if (request.method !== 'item/tool/requestUserInput') {
+      throw new Error(`App Server request ${request.method} is not authorized`);
+    }
+    if (this.#clarifications.has(runId)) {
+      throw new Error(`development run ${runId} already has a pending clarification`);
+    }
+    const parsed = clarificationRequestSchema.parse(request.params);
+    if (new Set(parsed.questions.map((question) => question.id)).size !== parsed.questions.length) {
+      throw new Error('clarification question identifiers must be unique');
+    }
+    if (parsed.questions.some((question) => question.isSecret)) {
+      throw new Error('secret user input is not supported by the development web surface');
+    }
+    const run = this.options.database.requireRun(runId);
+    if (run.generation !== generation || run.phase !== phase) {
+      throw new DevelopmentControllerConflictError(
+        `clarification request for development run ${runId} is stale`,
+      );
+    }
+    const questions = parsed.questions.map((question) => ({
+      id: question.id,
+      header: question.header,
+      question: question.question,
+      isOther: question.isOther,
+      ...(question.options === null ? {} : { options: question.options }),
+    }));
+    const interruptId = this.options.database.requestClarification({
+      runId,
+      attemptId,
+      workRevisionId: run.workRevisionId,
+      generation,
+      expectedLockVersion: run.lockVersion,
+      phase,
+      requestId: String(request.id),
+      threadId: parsed.threadId,
+      turnId: parsed.turnId,
+      questions,
+      prompt: questions.map((question) => `${question.header}: ${question.question}`).join('\n'),
+    });
+    const response = deferred<unknown>();
+    this.#clarifications.set(runId, {
+      interruptId,
+      reject: response.reject,
+      resolve: response.resolve,
+    });
+    try {
+      return await response.promise;
+    } finally {
+      this.#clarifications.delete(runId);
+    }
+  }
+
   private recordNotification(
     runId: number,
     generation: number,
@@ -585,6 +698,9 @@ export class DevelopmentController {
   }
 
   private async fail(runId: number, error: unknown): Promise<void> {
+    this.#clarifications
+      .get(runId)
+      ?.reject(error instanceof Error ? error : new Error(String(error)));
     let run = this.options.database.getRun(runId);
     if (run === undefined || ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.phase)) {
       return;
@@ -620,6 +736,36 @@ export class DevelopmentController {
 }
 
 export class DevelopmentControllerConflictError extends Error {}
+
+const clarificationRequestSchema = z.object({
+  threadId: z.string().uuid(),
+  turnId: z.string().uuid(),
+  itemId: z.string().min(1).max(255),
+  isBlocking: z.boolean().default(true),
+  questions: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(120),
+        header: z.string().min(1).max(120),
+        question: z.string().min(1).max(2000),
+        isOther: z.boolean().default(false),
+        isSecret: z.boolean().default(false),
+        options: z
+          .array(
+            z.object({
+              label: z.string().min(1).max(200),
+              description: z.string().max(1000),
+            }),
+          )
+          .max(3)
+          .nullable()
+          .optional()
+          .transform((value) => value ?? null),
+      }),
+    )
+    .min(1)
+    .max(3),
+});
 
 const developmentInstructions =
   'You are the implementation agent owned by Leverframe. Follow repository guidance. Ask only when ambiguity materially changes behavior or scope. Never push, create or modify a pull request, merge, deploy, or expose secrets without an explicit capability-bearing publication turn.';
@@ -674,16 +820,43 @@ function deferred<T>(): {
   return { promise, reject, resolve };
 }
 
-function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  milliseconds: number,
+  message: string,
+  signal?: AbortSignal,
+): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(message)), milliseconds);
+    let timeout: NodeJS.Timeout;
+
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(new Error('development controller stopped'));
+    };
+
+    timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      reject(new Error(message));
+    }, milliseconds);
+    signal?.addEventListener('abort', abort, { once: true });
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+    };
+
+    if (signal?.aborted === true) {
+      cleanup();
+      reject(new Error('development controller stopped'));
+      return;
+    }
     void promise.then(
       (value) => {
-        clearTimeout(timeout);
+        cleanup();
         resolve(value);
       },
       (error: unknown) => {
-        clearTimeout(timeout);
+        cleanup();
         reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
