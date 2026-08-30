@@ -588,6 +588,22 @@ export const migrations: readonly Migration[] = [
         ON development_outbound_intents(state, updated_at);
     `),
   },
+  {
+    version: 8,
+    name: 'close-terminal-development-interrupts',
+    apply: (database) => {
+      const now = new Date().toISOString();
+      database
+        .prepare(`
+          UPDATE development_interrupts SET
+            status = 'CANCELLED', resolved_at = ?, updated_at = ?, lock_version = lock_version + 1
+          WHERE status = 'OPEN' AND run_id IN (
+            SELECT id FROM development_runs WHERE phase IN ('COMPLETED', 'FAILED', 'CANCELLED')
+          )
+        `)
+        .run(now, now);
+    },
+  },
 ];
 
 export function runMigrations(database: DatabaseSync): number {

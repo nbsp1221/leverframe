@@ -108,12 +108,10 @@ export class DevelopmentController {
       });
     }
     run = this.options.database.requireRun(runId);
-    this.options.database.transition({
+    this.options.database.cancelRun({
       id: run.id,
       expectedGeneration: run.generation,
       expectedLockVersion: run.lockVersion,
-      phase: 'CANCELLED',
-      advanceGeneration: true,
       event: observed('run_cancelled'),
     });
     this.#active.get(runId)?.abort.abort();

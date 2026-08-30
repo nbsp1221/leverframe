@@ -339,6 +339,7 @@ describe('DevelopmentController planning', () => {
     await context.controller.cancelRun(context.run.id);
 
     expect(context.repository.requireRun(context.run.id).phase).toBe('CANCELLED');
+    expect(context.repository.getOpenInterrupt(context.run.id)).toBeUndefined();
     expect(context.controller.options.resources.list(context.run.id)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: 'SANDBOX', state: 'STOPPED' }),

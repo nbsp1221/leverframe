@@ -95,7 +95,10 @@ function projectionStatus(phase: DevelopmentPhase): TicketProjectionStatus {
   if (phase === 'COMPLETED') {
     return 'completed';
   }
-  if (['FAILED', 'CANCELLED'].includes(phase)) {
+  if (phase === 'CANCELLED') {
+    return 'cancelled';
+  }
+  if (phase === 'FAILED') {
     return 'failed';
   }
   return 'started';

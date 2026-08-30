@@ -33,12 +33,17 @@ describe('ticket status projection', () => {
 
     worker.start();
     await vi.waitFor(() => expect(projectStatus).toHaveBeenCalledWith('ticket-id', 'started'));
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 15);
+    const current = database.development.requireRun(run.id);
+    database.development.cancelRun({
+      id: current.id,
+      expectedGeneration: current.generation,
+      expectedLockVersion: current.lockVersion,
+      event: { type: 'run_cancelled', source: 'HUMAN', trust: 'HUMAN_DECIDED' },
     });
+    await vi.waitFor(() => expect(projectStatus).toHaveBeenCalledWith('ticket-id', 'cancelled'));
     await worker.stop();
 
-    expect(projectStatus).toHaveBeenCalledTimes(1);
+    expect(projectStatus).toHaveBeenCalledTimes(2);
     expect(database.developmentProjections.getTicketExternalId(run.id, 'multica')).toBe(
       'ticket-id',
     );

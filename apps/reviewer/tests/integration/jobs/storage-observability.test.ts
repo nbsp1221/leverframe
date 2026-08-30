@@ -145,7 +145,7 @@ describe('review observability storage', () => {
         .run('o/r', 1, 'a'.repeat(40), 'v1', 1, 'opened', 'd1', 'now', 'now');
       legacy.close();
       const migrated = new JobDatabase(path, { dataRoot: root });
-      expect(migrated.getSchemaVersion()).toBe(7);
+      expect(migrated.getSchemaVersion()).toBe(8);
       expect(migrated.countJobs()).toBe(1);
       expect(migrated.enqueuePullRequest({ ...input, deliveryId: 'd2' })).toMatchObject({
         jobCreated: true,

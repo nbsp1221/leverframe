@@ -4,7 +4,7 @@ import {
   DevelopmentConflictError,
   DevelopmentRepository,
 } from '../../../src/storage/development-repository.js';
-import { runMigrations, schemaVersion } from '../../../src/storage/migrations/index.js';
+import { migrations, runMigrations, schemaVersion } from '../../../src/storage/migrations/index.js';
 
 const now = '2026-08-30T00:00:00.000Z';
 const later = '2026-08-30T00:05:00.000Z';
@@ -25,7 +25,7 @@ function setup() {
 }
 
 describe('DevelopmentRepository', () => {
-  it('migrates to schema 7 and creates web-native work without an external provider', () => {
+  it('migrates to schema 8 and creates web-native work without an external provider', () => {
     const { database, repository } = setup();
     const run = repository.createRun({
       goal: 'Build a Leverframe-owned development loop.',
@@ -34,7 +34,7 @@ describe('DevelopmentRepository', () => {
       now,
     });
 
-    expect(schemaVersion(database)).toBe(7);
+    expect(schemaVersion(database)).toBe(8);
     expect(run).toMatchObject({
       generation: 1,
       goal: 'Build a Leverframe-owned development loop.',
@@ -50,6 +50,51 @@ describe('DevelopmentRepository', () => {
     expect(
       database.prepare('SELECT COUNT(*) AS count FROM development_work_revisions').get(),
     ).toEqual({ count: 0 });
+    database.close();
+  });
+
+  it('closes an open interrupt left on a terminal run during migration', () => {
+    const database = openDatabase(':memory:');
+    database.exec(
+      'CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)',
+    );
+    for (const migration of migrations.slice(0, 7)) {
+      migration.apply(database);
+      database
+        .prepare('INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)')
+        .run(migration.version, migration.name, now);
+    }
+    const repository = new DevelopmentRepository(database);
+    const created = repository.createRun({
+      goal: 'Migrate a cancelled run.',
+      repository: 'example/leverframe',
+      checkout,
+      now,
+    });
+    const cancelled = repository.transition({
+      id: created.id,
+      expectedGeneration: created.generation,
+      expectedLockVersion: created.lockVersion,
+      phase: 'CANCELLED',
+      event: { type: 'run_cancelled', source: 'HUMAN', trust: 'HUMAN_DECIDED', observedAt: now },
+    });
+    database
+      .prepare(`
+        INSERT INTO development_interrupts (
+          run_id, work_revision_id, generation, kind, status, prompt, context_json,
+          requested_at, created_at, updated_at
+        ) VALUES (?, ?, ?, 'PLAN_APPROVAL', 'OPEN', 'Approve?', '{}', ?, ?, ?)
+      `)
+      .run(cancelled.id, cancelled.workRevisionId, cancelled.generation, now, now, now);
+
+    runMigrations(database);
+
+    expect(repository.getOpenInterrupt(cancelled.id)).toBeUndefined();
+    expect(
+      database
+        .prepare('SELECT status FROM development_interrupts WHERE run_id = ?')
+        .get(cancelled.id),
+    ).toEqual({ status: 'CANCELLED' });
     database.close();
   });
 

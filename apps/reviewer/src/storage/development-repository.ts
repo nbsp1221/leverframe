@@ -148,6 +148,32 @@ export class DevelopmentRepository {
     return transaction(this.database, () => this.transitionWithinTransaction(input));
   }
 
+  cancelRun(input: {
+    id: number;
+    expectedGeneration: number;
+    expectedLockVersion: number;
+    event: DevelopmentEventInput;
+  }): DevelopmentRun {
+    return transaction(this.database, () => {
+      const now = input.event.observedAt ?? new Date().toISOString();
+      this.database
+        .prepare(`
+          UPDATE development_interrupts SET
+            status = 'CANCELLED', resolved_at = ?, updated_at = ?, lock_version = lock_version + 1
+          WHERE run_id = ? AND status = 'OPEN'
+        `)
+        .run(now, now, input.id);
+      return this.transitionWithinTransaction({
+        id: input.id,
+        expectedGeneration: input.expectedGeneration,
+        expectedLockVersion: input.expectedLockVersion,
+        phase: 'CANCELLED',
+        advanceGeneration: true,
+        event: { ...input.event, observedAt: now },
+      });
+    });
+  }
+
   setCandidate(input: {
     id: number;
     expectedGeneration: number;

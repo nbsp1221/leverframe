@@ -19,6 +19,7 @@ export const ticketProjectionStatuses = [
   'candidate_verified',
   'pr_linked',
   'completed',
+  'cancelled',
   'failed',
 ] as const;
 
