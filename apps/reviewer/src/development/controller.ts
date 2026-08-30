@@ -1,14 +1,27 @@
-import { z } from 'zod';
 import type { AppServerNotification, AppServerRequest } from '../codex/app-server.js';
 import type { GitHubAppClient } from '../github/client.js';
 import type { DevelopmentSandboxManager } from '../sandbox/development.js';
 import type {
   DevelopmentAttempt,
-  DevelopmentEventInput,
   DevelopmentRepository,
 } from '../storage/development-repository.js';
+import type { DevelopmentResourceRepository } from '../storage/development-resource-repository.js';
 import { CodexAppServer } from '../codex/app-server.js';
 import { developmentSandboxName } from '../identity.js';
+import {
+  clarificationRequestSchema,
+  deferred,
+  developmentInstructions,
+  executionPhases,
+  implementationPrompt,
+  normalizedNotification,
+  observed,
+  planningPrompt,
+  reviewFixPrompt,
+  sanitize,
+  withTimeout,
+} from './controller-support.js';
+import { DevelopmentResourceLifecycle } from './resource-lifecycle.js';
 
 const leaseMilliseconds = 10 * 60 * 1000;
 const turnTimeoutMilliseconds = 30 * 60 * 1000;
@@ -24,6 +37,7 @@ export interface DevelopmentReviewFinding {
 export class DevelopmentController {
   readonly #active = new Map<number, { abort: AbortController; completion: Promise<void> }>();
   readonly #servers = new Map<number, CodexAppServer>();
+  readonly #resourceLifecycle: DevelopmentResourceLifecycle;
   readonly #clarifications = new Map<
     number,
     {
@@ -42,14 +56,26 @@ export class DevelopmentController {
         input: Parameters<typeof CodexAppServer.launch>[0],
       ) => ReturnType<typeof CodexAppServer.launch>;
       model: string;
+      resources: DevelopmentResourceRepository;
       sandbox: DevelopmentSandboxManager;
       verificationCommand: string;
       workerId: string;
     },
-  ) {}
+  ) {
+    this.#resourceLifecycle = new DevelopmentResourceLifecycle(options);
+  }
 
   get activeRuns(): readonly number[] {
     return [...this.#active.keys()];
+  }
+
+  async recover(): Promise<void> {
+    this.#resourceLifecycle.reconcileRetained();
+    for (const run of this.options.database.listRuns()) {
+      if (executionPhases.has(run.phase)) {
+        await this.fail(run.id, new Error('development execution was interrupted by restart'));
+      }
+    }
   }
 
   startPlanning(runId: number): Promise<void> {
@@ -65,8 +91,38 @@ export class DevelopmentController {
     return completion;
   }
 
-  cancel(runId: number): void {
+  async cancelRun(runId: number): Promise<void> {
+    let run = this.options.database.requireRun(runId);
+    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.phase)) {
+      throw new DevelopmentControllerConflictError(`development run ${runId} is already terminal`);
+    }
+    const attempt = this.options.database.findActiveAttempt(runId);
+    if (attempt?.leaseOwner !== undefined) {
+      this.options.database.completeAttempt({
+        id: attempt.id,
+        runId,
+        generation: attempt.generation,
+        leaseOwner: attempt.leaseOwner,
+        state: 'CANCELLED',
+        outcomeCode: 'OPERATOR_CANCELLED',
+      });
+    }
+    run = this.options.database.requireRun(runId);
+    this.options.database.transition({
+      id: run.id,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'CANCELLED',
+      advanceGeneration: true,
+      event: observed('run_cancelled'),
+    });
     this.#active.get(runId)?.abort.abort();
+    this.#clarifications.get(runId)?.reject(new Error('development run cancelled'));
+    await this.#resourceLifecycle.stopAndRetain(runId);
+  }
+
+  async cleanupRun(runId: number): Promise<void> {
+    await this.#resourceLifecycle.cleanup(runId);
   }
 
   async stop(): Promise<void> {
@@ -298,10 +354,7 @@ export class DevelopmentController {
 
   private async plan(runId: number, signal: AbortSignal): Promise<void> {
     let run = this.options.database.requireRun(runId);
-    const repository = await this.options.github.getRepository({
-      allowedOwnerId: this.options.allowedOwnerId,
-      repository: run.repository,
-    });
+    const repository = this.options.database.getCheckoutSnapshot(runId);
     const readToken = await this.options.github.createRepositoryReadToken({
       allowedOwnerId: this.options.allowedOwnerId,
       installationId: repository.installationId,
@@ -313,18 +366,20 @@ export class DevelopmentController {
       expectedLockVersion: run.lockVersion,
       phase: 'PREPARING',
       advanceGeneration: true,
-      event: observed('workspace_preparing', { base_sha: repository.defaultBranchSha }),
+      event: observed('workspace_preparing', { base_sha: repository.baseSha }),
     });
     const preparing = this.claim(run, 'PREPARING', 'DETERMINISTIC');
     const branch = `codex/development-${run.id}`;
+    this.#resourceLifecycle.observePreparing(run.id, run.generation);
     const sandbox = await this.options.sandbox.prepare({
       runId: run.id,
       branch,
       cloneUrl: repository.cloneUrl,
-      baseSha: repository.defaultBranchSha,
+      baseSha: repository.baseSha,
       readToken,
       signal,
     });
+    this.#resourceLifecycle.observeActive(run.id, run.generation);
     this.options.database.completeAttempt({
       id: preparing.id,
       runId: run.id,
@@ -413,7 +468,7 @@ export class DevelopmentController {
     } finally {
       this.#servers.delete(run.id);
       server?.close();
-      await this.options.sandbox.stop(run.id).catch(() => undefined);
+      await this.#resourceLifecycle.stopAndRetain(run.id);
     }
   }
 
@@ -584,7 +639,7 @@ export class DevelopmentController {
         advanceGeneration: true,
         event: observed('verification_failed'),
       });
-      await this.options.sandbox.stop(run.id).catch(() => undefined);
+      await this.#resourceLifecycle.stopAndRetain(run.id);
       return;
     }
     run = this.options.database.requireRun(run.id);
@@ -604,7 +659,7 @@ export class DevelopmentController {
           ? 'Publish this exact verified candidate by pushing its branch and creating a pull request?'
           : 'Publish this exact verified candidate by pushing one update to the existing pull request?',
     });
-    await this.options.sandbox.stop(run.id).catch(() => undefined);
+    await this.#resourceLifecycle.stopAndRetain(run.id);
   }
 
   private async publish(
@@ -725,7 +780,7 @@ export class DevelopmentController {
       this.#servers.delete(run.id);
       server?.close();
       await this.options.sandbox.disablePublication(runId).catch(() => undefined);
-      await this.options.sandbox.stop(runId).catch(() => undefined);
+      await this.#resourceLifecycle.stopAndRetain(runId);
     }
   }
 
@@ -855,148 +910,8 @@ export class DevelopmentController {
     } catch {
       // A newer generation owns the run; the stale failure is intentionally ignored.
     }
-    await this.options.sandbox.stop(runId).catch(() => undefined);
+    await this.#resourceLifecycle.stopAndRetain(runId);
   }
 }
 
 export class DevelopmentControllerConflictError extends Error {}
-
-const clarificationRequestSchema = z.object({
-  threadId: z.string().uuid(),
-  turnId: z.string().uuid(),
-  itemId: z.string().min(1).max(255),
-  isBlocking: z.boolean().default(true),
-  questions: z
-    .array(
-      z.object({
-        id: z.string().min(1).max(120),
-        header: z.string().min(1).max(120),
-        question: z.string().min(1).max(2000),
-        isOther: z.boolean().default(false),
-        isSecret: z.boolean().default(false),
-        options: z
-          .array(
-            z.object({
-              label: z.string().min(1).max(200),
-              description: z.string().max(1000),
-            }),
-          )
-          .max(3)
-          .nullable()
-          .optional()
-          .transform((value) => value ?? null),
-      }),
-    )
-    .min(1)
-    .max(3),
-});
-
-const developmentInstructions =
-  'You are the implementation agent owned by Leverframe. Follow repository guidance. Ask only when ambiguity materially changes behavior or scope. Never push, create or modify a pull request, merge, deploy, or expose secrets without an explicit capability-bearing publication turn.';
-
-const implementationPrompt =
-  'The operator approved the plan. Implement it completely, follow repository guidance, use the supplied commit skill for coherent local commits, and run repository-appropriate tests, lint, type checks, builds, and real QA. Do not push or create or modify a pull request.';
-
-function planningPrompt(goal: string): string {
-  return `Analyze the repository and propose the smallest coherent implementation plan for this accepted goal:\n\n${goal}\n\nDo not modify files in this planning turn. State material ambiguities as explicit questions. Otherwise provide a concrete plan, verification strategy, and risks for operator approval.`;
-}
-
-function reviewFixPrompt(findings: DevelopmentReviewFinding[]): string {
-  const boundedFindings = findings.slice(0, 50).map((finding) => ({
-    evidence: sanitize(finding.evidence, 4000),
-    file: sanitize(finding.file, 1000),
-    fingerprint: finding.fingerprint,
-    line: finding.line,
-    title: sanitize(finding.title, 1000),
-  }));
-  return `The existing Leverframe review found the following actionable issues on the current published candidate. Evaluate every finding against the code rather than trusting it blindly, fix only valid issues, preserve evidence for rejected findings, commit coherent changes with the supplied commit skill, and rerun repository-appropriate verification and real QA. Do not push or create or modify a pull request.\n\n${JSON.stringify(boundedFindings)}`;
-}
-
-function normalizedNotification(
-  notification: AppServerNotification,
-): DevelopmentEventInput | undefined {
-  if (notification.method === 'item/completed') {
-    const params = notification.params as { item?: { type?: string; text?: string; id?: string } };
-    if (params.item?.type === 'agentMessage' && typeof params.item.text === 'string') {
-      return {
-        type: 'agent_message',
-        source: 'CODEX',
-        trust: 'AGENT_CLAIMED',
-        payload: { message: sanitize(params.item.text, 20_000), item_id: params.item.id ?? null },
-      };
-    }
-  }
-  if (notification.method === 'turn/completed') {
-    return { type: 'turn_completed', source: 'CODEX', trust: 'HARNESS_OBSERVED' };
-  }
-  return undefined;
-}
-
-function observed(type: string, payload: Record<string, unknown> = {}): DevelopmentEventInput {
-  return { type, payload, source: 'LEVERFRAME', trust: 'SYSTEM_OBSERVED' };
-}
-
-function sanitize(value: string, maximum: number): string {
-  return value
-    .replaceAll(/\/home\/[^/\s]+/g, '/home/[redacted]')
-    .replaceAll(/\/tmp\/[^\s]+/g, '[private-path]')
-    .replaceAll(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[redacted-email]')
-    .slice(0, maximum);
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  reject: (error: Error) => void;
-  resolve: (value: T) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (error: Error) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, reject, resolve };
-}
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  milliseconds: number,
-  message: string,
-  signal?: AbortSignal,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    let timeout: NodeJS.Timeout;
-
-    const abort = () => {
-      clearTimeout(timeout);
-      reject(new Error('development controller stopped'));
-    };
-
-    timeout = setTimeout(() => {
-      signal?.removeEventListener('abort', abort);
-      reject(new Error(message));
-    }, milliseconds);
-    signal?.addEventListener('abort', abort, { once: true });
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', abort);
-    };
-
-    if (signal?.aborted === true) {
-      cleanup();
-      reject(new Error('development controller stopped'));
-      return;
-    }
-    void promise.then(
-      (value) => {
-        cleanup();
-        resolve(value);
-      },
-      (error: unknown) => {
-        cleanup();
-        reject(error instanceof Error ? error : new Error(String(error)));
-      },
-    );
-  });
-}

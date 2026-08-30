@@ -5,6 +5,7 @@ import type { ReviewResult } from '../review/result.js';
 import { openDatabase } from '../storage/connection.js';
 import { DevelopmentProjectionRepository } from '../storage/development-projection-repository.js';
 import { DevelopmentRepository } from '../storage/development-repository.js';
+import { DevelopmentResourceRepository } from '../storage/development-resource-repository.js';
 import {
   EvaluationRepository,
   type EvaluationRevision,
@@ -170,6 +171,7 @@ export class JobDatabase {
   readonly #reviewRepository: ReviewRepository;
   readonly development: DevelopmentRepository;
   readonly developmentProjections: DevelopmentProjectionRepository;
+  readonly developmentResources: DevelopmentResourceRepository;
 
   constructor(path: string, options: { dataRoot?: string } = {}) {
     const dataRoot = resolve(
@@ -184,6 +186,7 @@ export class JobDatabase {
     );
     this.development = new DevelopmentRepository(this.#database);
     this.developmentProjections = new DevelopmentProjectionRepository(this.#database);
+    this.developmentResources = new DevelopmentResourceRepository(this.#database);
     this.#reviewRepository.backfillArtifacts();
     this.#database.exec(`
       UPDATE review_jobs

@@ -265,6 +265,14 @@ export class DevelopmentSandboxManager {
     rmSync(runDirectory, { recursive: true });
   }
 
+  hasRetainedWorkspace(runId: number): boolean {
+    const directory = resolveInside(this.#developmentRoot, String(runId));
+    return (
+      existsSync(resolveInside(directory, 'workspace')) &&
+      existsSync(resolveInside(directory, 'skills'))
+    );
+  }
+
   paths(runId: number, create = false): { workspaceDirectory: string; skillsDirectory: string } {
     const runDirectory = this.runDirectory(runId, create);
     const workspaceDirectory = resolveInside(runDirectory, 'workspace');

@@ -9,6 +9,12 @@ import {
   resolveClarification,
 } from './development-clarification-repository.js';
 import {
+  type DevelopmentCheckoutSnapshot,
+  DevelopmentConflictError,
+  type DevelopmentRunCreateInput,
+  parseCheckoutSnapshot,
+} from './development-input.js';
+import {
   type DevelopmentAttemptRow,
   type DevelopmentRunRow,
   mapDevelopmentAttempt,
@@ -20,6 +26,7 @@ import {
   findRunByPullRequest,
   getPullRequestReference,
 } from './development-pull-request-repository.js';
+import { createDevelopmentRun } from './development-run-creation.js';
 
 export type { DevelopmentPhase } from './development-phases.js';
 
@@ -63,68 +70,37 @@ export interface DevelopmentAttempt {
   turnId?: string;
 }
 
-export class DevelopmentConflictError extends Error {}
+export type { DevelopmentCheckoutSnapshot } from './development-input.js';
+
+export { DevelopmentConflictError } from './development-input.js';
 
 export class DevelopmentRepository {
   constructor(private readonly database: DatabaseSync) {}
 
-  createRun(input: {
-    repository: string;
-    goal: string;
-    externalSource?: { provider: string; id: string; key?: string; url?: string };
-    now?: string;
-  }): DevelopmentRun {
-    const now = input.now ?? new Date().toISOString();
-    return transaction(this.database, () => {
-      const result = this.database
-        .prepare(`
-          INSERT INTO development_runs (
-            repository, phase, generation, lock_version, last_activity_at, created_at, updated_at
-          ) VALUES (?, 'INTAKE', 1, 1, ?, ?, ?)
-        `)
-        .run(input.repository, now, now, now);
-      const runId = Number(result.lastInsertRowid);
-      const source = input.externalSource;
-      const revision = this.database
-        .prepare(`
-          INSERT INTO development_work_revisions (
-            run_id, revision, source_kind, goal, normalized_json,
-            source_provider, source_external_id, source_external_key, source_url, created_at
-          ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
-        `)
-        .run(
-          runId,
-          source === undefined ? 'WEB' : 'TICKET',
-          input.goal,
-          JSON.stringify({ goal: input.goal, repository: input.repository }),
-          source?.provider ?? null,
-          source?.id ?? null,
-          source?.key ?? null,
-          source?.url ?? null,
-          now,
-        );
-      const revisionId = Number(revision.lastInsertRowid);
-      this.database
-        .prepare('UPDATE development_runs SET accepted_work_revision_id = ? WHERE id = ?')
-        .run(revisionId, runId);
-      if (source !== undefined) {
-        this.database
-          .prepare(`
-            INSERT INTO development_external_refs (
-              run_id, provider, kind, external_id, external_key, url, created_at, updated_at
-            ) VALUES (?, ?, 'TICKET', ?, ?, ?, ?, ?)
-          `)
-          .run(runId, source.provider, source.id, source.key ?? null, source.url ?? null, now, now);
-      }
-      this.insertEvent(runId, 1, {
+  createRun(input: DevelopmentRunCreateInput): DevelopmentRun {
+    const runId = createDevelopmentRun(this.database, input, (id, now, source) => {
+      this.insertEvent(id, 1, {
         type: 'run_created',
         source: 'HUMAN',
         trust: 'HUMAN_DECIDED',
-        payload: { source: source === undefined ? 'web' : 'ticket' },
+        payload: { source },
         observedAt: now,
       });
-      return this.requireRun(runId);
     });
+    return this.requireRun(runId);
+  }
+
+  getCheckoutSnapshot(runId: number): DevelopmentCheckoutSnapshot {
+    const row = this.database
+      .prepare(`SELECT w.normalized_json
+        FROM development_runs r
+        JOIN development_work_revisions w ON w.id = r.accepted_work_revision_id
+        WHERE r.id = ?`)
+      .get(runId) as { normalized_json: string } | undefined;
+    if (row === undefined) {
+      throw new Error(`development run ${runId} not found`);
+    }
+    return parseCheckoutSnapshot(row.normalized_json, runId);
   }
 
   getRun(id: number): DevelopmentRun | undefined {

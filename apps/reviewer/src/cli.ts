@@ -90,6 +90,7 @@ function serve(): void {
     database: database.development,
     github,
     model: config.model,
+    resources: database.developmentResources,
     sandbox: new DevelopmentSandboxManager({
       dataDirectory: dataRoot,
       sandboxTemplate: config.sandboxTemplate,
@@ -160,11 +161,21 @@ function serve(): void {
           private: repository.private,
           repository: repository.repository,
         })),
-      validateDevelopmentRepository: async (repository) => {
-        return github.isRepositoryAccessible({
+      resolveDevelopmentRepository: async (repository) => {
+        const resolved = await github.resolveRepository({
           allowedOwnerId: config.allowedOwnerId,
           repository,
         });
+        if (resolved === undefined) {
+          return undefined;
+        }
+        return {
+          baseSha: resolved.defaultBranchSha,
+          cloneUrl: resolved.cloneUrl,
+          defaultBranch: resolved.defaultBranch,
+          installationId: resolved.installationId,
+          repositoryId: resolved.repositoryId,
+        };
       },
       ...(ticketAdapter === undefined
         ? {}
@@ -208,6 +219,8 @@ function serve(): void {
       onDevelopmentRunCreated: (runId: number) => {
         void developmentController.startPlanning(runId);
       },
+      onDevelopmentRunCancelled: (runId: number) => developmentController.cancelRun(runId),
+      onDevelopmentRunCleanup: (runId: number) => developmentController.cleanupRun(runId),
       onDevelopmentClarificationAnswer: (
         input: Parameters<DevelopmentController['answerClarification']>[0],
       ) => {
@@ -269,14 +282,19 @@ function serve(): void {
 
   server.listen(config.port, config.host, () => {
     console.log(`Leverframe listening on http://${config.host}:${config.port}`);
-    ticketProjectionWorker?.start();
-    void startWorkersAfterRecovery(
-      config.sandboxTemplate,
-      config.jobsDirectory,
-      database,
-      worker,
-      threadWorker,
-    );
+    void (async () => {
+      await developmentController.recover();
+      ticketProjectionWorker?.start();
+      await startWorkersAfterRecovery(
+        config.sandboxTemplate,
+        config.jobsDirectory,
+        database,
+        worker,
+        threadWorker,
+      );
+    })().catch((error: unknown) => {
+      console.error('startup recovery failed; workers were not started', error);
+    });
   });
 }
 

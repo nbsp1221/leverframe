@@ -491,6 +491,26 @@ export const developmentEvidenceSchema = z.object({
   created_at: isoDate,
 });
 
+export const developmentResourceSchema = z.object({
+  kind: z.enum(['sandbox', 'workspace', 'branch', 'preview']),
+  provider: z.string().min(1),
+  external_id: z.string().min(1),
+  state: z.enum([
+    'provisioning',
+    'active',
+    'stopped',
+    'retained',
+    'cleanup_pending',
+    'cleanup_failed',
+    'cleaned',
+    'unknown',
+  ]),
+  generation: z.number().int().positive(),
+  last_error: z.string().nullable(),
+  observed_at: isoDate,
+  updated_at: isoDate,
+});
+
 export const developmentPlanApprovalSchema = z.object({
   interrupt_id: z.number().int().positive(),
   expected_lock_version: z.number().int().positive(),
@@ -511,6 +531,7 @@ export const developmentRunDetailSchema = z.object({
   events: z.array(developmentEventSchema),
   interrupt: developmentInterruptSchema.nullable(),
   evidence: z.array(developmentEvidenceSchema),
+  resources: z.array(developmentResourceSchema),
   external_source: z
     .object({
       provider: z.string().min(1),

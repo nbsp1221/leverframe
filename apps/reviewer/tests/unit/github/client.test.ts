@@ -108,7 +108,9 @@ describe('development repository catalog', () => {
         data: {
           clone_url: 'https://github.com/owner/project.git',
           default_branch: 'main',
+          full_name: 'owner/project',
           id: 9,
+          owner: { id: 7 },
         },
       })
       .mockResolvedValueOnce({ data: { commit: { sha: 'a'.repeat(40) } } });
@@ -137,6 +139,28 @@ describe('development repository catalog', () => {
       createAppClient().getRepository({ allowedOwnerId: 7, repository: 'owner/project' }),
     ).rejects.toThrow('not accessible to the GitHub App');
     expect(githubMocks.getInstallationOctokit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a repository renamed after catalog selection', async () => {
+    githubMocks.appRequest.mockResolvedValueOnce({
+      data: { account: { id: 7 }, id: 41, suspended_at: null },
+    });
+    githubMocks.installationRequest.mockResolvedValueOnce({
+      data: {
+        clone_url: 'https://github.com/owner/renamed.git',
+        default_branch: 'main',
+        full_name: 'owner/renamed',
+        id: 9,
+        owner: { id: 7 },
+      },
+    });
+
+    await expect(
+      createAppClient().resolveRepository({
+        allowedOwnerId: 7,
+        repository: 'owner/project',
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('reports an exact missing installation as inaccessible', async () => {

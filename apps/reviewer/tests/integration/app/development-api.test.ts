@@ -15,6 +15,13 @@ import { JobDatabase } from '../../../src/jobs/database.js';
 
 const cleanup: Array<() => void> = [];
 const sandboxTemplate = `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`;
+const checkout = {
+  baseSha: 'a'.repeat(40),
+  cloneUrl: 'https://github.com/owner/repo.git',
+  defaultBranch: 'main',
+  installationId: 1,
+  repositoryId: 2,
+};
 
 afterEach(() => {
   for (const close of cleanup.splice(0)) {
@@ -128,7 +135,7 @@ describe('development API', () => {
     const { url } = await fixture({
       hooks: {
         onDevelopmentRunCreated,
-        validateDevelopmentRepository: vi.fn().mockResolvedValue(false),
+        resolveDevelopmentRepository: vi.fn().mockResolvedValue(undefined),
       },
     });
 
@@ -157,7 +164,7 @@ describe('development API', () => {
     const { url } = await fixture({
       hooks: {
         onDevelopmentRunCreated,
-        validateDevelopmentRepository: vi.fn().mockResolvedValue(true),
+        resolveDevelopmentRepository: vi.fn().mockResolvedValue(checkout),
       },
     });
     const response = await fetch(`${url}/api/v1/development/runs`, {
@@ -169,6 +176,17 @@ describe('development API', () => {
     const created = developmentRunSummarySchema.parse(await response.json());
     expect(created).toMatchObject({ phase: 'intake', operator_action: null });
     expect(onDevelopmentRunCreated).toHaveBeenCalledWith(created.id);
+
+    const duplicate = await fetch(`${url}/api/v1/development/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repository: 'owner/repo', goal: 'Do useful work.' }),
+    });
+    expect(duplicate.status).toBe(409);
+    await expect(duplicate.json()).resolves.toMatchObject({
+      code: 'DUPLICATE_DEVELOPMENT_RUN',
+    });
+    expect(onDevelopmentRunCreated).toHaveBeenCalledTimes(1);
 
     const list = developmentRunListSchema.parse(
       await (await fetch(`${url}/api/v1/development/runs`)).json(),
@@ -189,6 +207,7 @@ describe('development API', () => {
     const run = database.development.createRun({
       repository: 'owner/repo',
       goal: 'Imported work.',
+      checkout,
       externalSource: {
         provider: 'multica',
         id: '1e9eb5d7-496f-4d9a-8a7d-0f31a7724502',
@@ -220,12 +239,63 @@ describe('development API', () => {
     expect(detail.external_sync).toMatchObject({ status: 'started', state: 'confirmed' });
   });
 
+  it('routes explicit cancellation and cleanup actions through the runtime owner', async () => {
+    let database!: JobDatabase;
+    const onDevelopmentRunCancelled = vi.fn((runId: number) => {
+      const run = database.development.requireRun(runId);
+      database.development.transition({
+        id: run.id,
+        expectedGeneration: run.generation,
+        expectedLockVersion: run.lockVersion,
+        phase: 'CANCELLED',
+        event: { type: 'run_cancelled', source: 'HUMAN', trust: 'HUMAN_DECIDED' },
+      });
+      return Promise.resolve();
+    });
+    const onDevelopmentRunCleanup = vi.fn(() => Promise.resolve());
+    const context = await fixture({
+      hooks: { onDevelopmentRunCancelled, onDevelopmentRunCleanup },
+    });
+    database = context.database;
+    const cancelled = database.development.createRun({
+      repository: 'owner/repo',
+      goal: 'Cancel safely.',
+      checkout,
+    });
+
+    const cancelResponse = await fetch(
+      `${context.url}/api/v1/development/runs/${cancelled.id}/cancel`,
+      { method: 'POST' },
+    );
+
+    expect(cancelResponse.status).toBe(202);
+    expect(developmentRunSummarySchema.parse(await cancelResponse.json()).phase).toBe('cancelled');
+    expect(onDevelopmentRunCancelled).toHaveBeenCalledWith(cancelled.id);
+
+    const cleanable = database.development.createRun({
+      repository: 'owner/repo',
+      goal: 'Clean after merge.',
+      checkout,
+    });
+    const cleanupResponse = await fetch(
+      `${context.url}/api/v1/development/runs/${cleanable.id}/cleanup`,
+      { method: 'POST' },
+    );
+
+    expect(cleanupResponse.status).toBe(202);
+    expect(onDevelopmentRunCleanup).toHaveBeenCalledWith(cleanable.id);
+  });
+
   it('accepts only the current plan approval revision', async () => {
     const onDevelopmentPlanApproval = vi.fn();
     const { database, url } = await fixture({
       hooks: { onDevelopmentPlanApproval },
     });
-    let run = database.development.createRun({ repository: 'owner/repo', goal: 'Plan it.' });
+    let run = database.development.createRun({
+      repository: 'owner/repo',
+      goal: 'Plan it.',
+      checkout,
+    });
     run = database.development.transition({
       id: run.id,
       expectedGeneration: run.generation,
@@ -274,7 +344,11 @@ describe('development API', () => {
     const { database, url } = await fixture({
       hooks: { onDevelopmentClarificationAnswer },
     });
-    let run = database.development.createRun({ repository: 'owner/repo', goal: 'Clarify it.' });
+    let run = database.development.createRun({
+      repository: 'owner/repo',
+      goal: 'Clarify it.',
+      checkout,
+    });
     run = database.development.transition({
       id: run.id,
       expectedGeneration: run.generation,
@@ -359,7 +433,11 @@ describe('development API', () => {
 
   it('replays normalized events through a terminal resumable stream', async () => {
     const { database, url } = await fixture();
-    const run = database.development.createRun({ repository: 'owner/repo', goal: 'Observe it.' });
+    const run = database.development.createRun({
+      repository: 'owner/repo',
+      goal: 'Observe it.',
+      checkout,
+    });
     database.development.transition({
       id: run.id,
       expectedGeneration: run.generation,

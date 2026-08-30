@@ -10,6 +10,13 @@ const now = '2026-08-30T00:00:00.000Z';
 const later = '2026-08-30T00:05:00.000Z';
 const candidateA = 'a'.repeat(64);
 const candidateB = 'b'.repeat(64);
+const checkout = {
+  baseSha: 'a'.repeat(40),
+  cloneUrl: 'https://github.com/example/leverframe.git',
+  defaultBranch: 'main',
+  installationId: 1,
+  repositoryId: 2,
+};
 
 function setup() {
   const database = openDatabase(':memory:');
@@ -23,6 +30,7 @@ describe('DevelopmentRepository', () => {
     const run = repository.createRun({
       goal: 'Build a Leverframe-owned development loop.',
       repository: 'example/leverframe',
+      checkout,
       now,
     });
 
@@ -34,6 +42,7 @@ describe('DevelopmentRepository', () => {
       phase: 'INTAKE',
       revision: 1,
     });
+    expect(repository.getCheckoutSnapshot(run.id)).toEqual(checkout);
     expect(
       database.prepare('SELECT COUNT(*) AS count FROM development_external_refs').get(),
     ).toEqual({ count: 0 });
@@ -44,17 +53,38 @@ describe('DevelopmentRepository', () => {
     database.close();
   });
 
+  it('atomically rejects the same accepted input while its run is active', () => {
+    const { database, repository } = setup();
+    const input = {
+      goal: 'Start exactly once.',
+      repository: 'example/leverframe',
+      checkout,
+      now,
+    };
+    const first = repository.createRun(input);
+
+    expect(() => repository.createRun(input)).toThrow(
+      `development run ${first.id} already owns this accepted input`,
+    );
+    expect(database.prepare('SELECT COUNT(*) AS count FROM development_runs').get()).toEqual({
+      count: 1,
+    });
+    database.close();
+  });
+
   it('stores ticket providers only as optional revision and external-reference data', () => {
     const { database, repository } = setup();
     const first = repository.createRun({
       goal: 'Import from one ticket system.',
       repository: 'example/leverframe',
+      checkout,
       externalSource: { provider: 'multica', id: 'ticket-59', key: 'PER-59' },
       now,
     });
     const second = repository.createRun({
       goal: 'Import from another ticket system.',
       repository: 'example/leverframe',
+      checkout,
       externalSource: { provider: 'linear', id: 'issue-1', key: 'ENG-1' },
       now,
     });
@@ -80,6 +110,7 @@ describe('DevelopmentRepository', () => {
     const created = repository.createRun({
       goal: 'Claim once.',
       repository: 'example/leverframe',
+      checkout,
       now,
     });
     const run = repository.transition({
@@ -129,6 +160,7 @@ describe('DevelopmentRepository', () => {
     const run = repository.createRun({
       goal: 'Fence callbacks.',
       repository: 'example/leverframe',
+      checkout,
       now,
     });
     const transitioned = repository.transition({
@@ -182,6 +214,7 @@ describe('DevelopmentRepository', () => {
     const initial = repository.createRun({
       goal: 'Verify exact candidates.',
       repository: 'example/leverframe',
+      checkout,
       now,
     });
     const first = repository.setCandidate({
@@ -281,6 +314,7 @@ describe('DevelopmentRepository', () => {
     const run = repository.createRun({
       goal: 'Preserve recoverable work.',
       repository: 'example/leverframe',
+      checkout,
       now,
     });
     database

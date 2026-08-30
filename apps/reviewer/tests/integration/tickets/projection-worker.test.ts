@@ -9,6 +9,13 @@ describe('ticket status projection', () => {
     const run = database.development.createRun({
       repository: 'owner/repo',
       goal: 'Do work',
+      checkout: {
+        baseSha: 'a'.repeat(40),
+        cloneUrl: 'https://github.com/owner/repo.git',
+        defaultBranch: 'main',
+        installationId: 1,
+        repositoryId: 2,
+      },
       externalSource: { provider: 'multica', id: 'ticket-id', key: 'PER-59' },
     });
     const projectStatus = vi.fn().mockResolvedValue(undefined);

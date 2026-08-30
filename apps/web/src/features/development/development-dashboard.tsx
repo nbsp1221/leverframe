@@ -43,7 +43,7 @@ export async function DevelopmentDashboard({
         <SummaryCard label={t('needsAttention')} value={attentionCount} />
         <SummaryCard label={t('availableRepositories')} value={repositories?.length ?? 0} />
       </div>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(28rem,2fr)]">
         <Card>
           <CardHeader>
             <CardTitle>{t('runs')}</CardTitle>

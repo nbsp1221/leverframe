@@ -201,6 +201,36 @@ const approvePublicationRoute = createRoute({
   },
 });
 
+const cancelRunRoute = createRoute({
+  method: 'post',
+  path: '/api/v1/development/runs/{runId}/cancel',
+  operationId: 'cancelDevelopmentRun',
+  tags: ['Development'],
+  summary: 'Cancel a non-terminal development run and retain its resources',
+  request: { params: developmentRunIdParamsSchema },
+  responses: {
+    202: jsonResponse(developmentRunSummarySchema, 'The run was cancelled.'),
+    404: jsonResponse(errorResponseSchema, 'The run was not found.'),
+    409: jsonResponse(errorResponseSchema, 'The run cannot be cancelled.'),
+    422: jsonResponse(errorResponseSchema, 'The run identifier is invalid.'),
+  },
+});
+
+const cleanupRunRoute = createRoute({
+  method: 'post',
+  path: '/api/v1/development/runs/{runId}/cleanup',
+  operationId: 'cleanupDevelopmentRun',
+  tags: ['Development'],
+  summary: 'Clean retained resources after an observed merge',
+  request: { params: developmentRunIdParamsSchema },
+  responses: {
+    202: jsonResponse(developmentRunSummarySchema, 'Cleanup completed.'),
+    404: jsonResponse(errorResponseSchema, 'The run was not found.'),
+    409: jsonResponse(errorResponseSchema, 'Cleanup is unsafe or failed.'),
+    422: jsonResponse(errorResponseSchema, 'The run identifier is invalid.'),
+  },
+});
+
 export function registerDevelopmentRoutes(
   app: OpenAPIHono,
   database: JobDatabase,
@@ -271,19 +301,19 @@ export function registerDevelopmentRoutes(
   app.openapi(createRunRoute, async (c) => {
     if (
       hooks.onDevelopmentRunCreated === undefined ||
-      hooks.validateDevelopmentRepository === undefined
+      hooks.resolveDevelopmentRepository === undefined
     ) {
       return apiError(c, 409, 'development runtime is not configured', 'DEVELOPMENT_UNAVAILABLE');
     }
     const input = c.req.valid('json');
-    let accessible: boolean;
+    let checkout: Awaited<ReturnType<NonNullable<typeof hooks.resolveDevelopmentRepository>>>;
     try {
-      accessible = await hooks.validateDevelopmentRepository(input.repository);
+      checkout = await hooks.resolveDevelopmentRepository(input.repository);
     } catch (error) {
       console.error('failed to validate development repository', error);
       return apiError(c, 503, 'repository access could not be verified', 'GITHUB_UNAVAILABLE');
     }
-    if (!accessible) {
+    if (checkout === undefined) {
       return apiError(
         c,
         409,
@@ -291,20 +321,29 @@ export function registerDevelopmentRoutes(
         'REPOSITORY_UNAVAILABLE',
       );
     }
-    const run = database.development.createRun({
-      repository: input.repository,
-      goal: input.goal,
-      ...(input.external_source === undefined
-        ? {}
-        : {
-            externalSource: {
-              provider: input.external_source.provider,
-              id: input.external_source.id,
-              ...(input.external_source.key === null ? {} : { key: input.external_source.key }),
-              ...(input.external_source.url === null ? {} : { url: input.external_source.url }),
-            },
-          }),
-    });
+    let run: DevelopmentRun;
+    try {
+      run = database.development.createRun({
+        repository: input.repository,
+        goal: input.goal,
+        checkout,
+        ...(input.external_source === undefined
+          ? {}
+          : {
+              externalSource: {
+                provider: input.external_source.provider,
+                id: input.external_source.id,
+                ...(input.external_source.key === null ? {} : { key: input.external_source.key }),
+                ...(input.external_source.url === null ? {} : { url: input.external_source.url }),
+              },
+            }),
+      });
+    } catch (error) {
+      if (error instanceof DevelopmentConflictError) {
+        return apiError(c, 409, error.message, 'DUPLICATE_DEVELOPMENT_RUN');
+      }
+      throw error;
+    }
     hooks.onDevelopmentRunCreated(run.id);
     return json(c, developmentRunSummarySchema.parse(summary(run)), 201);
   });
@@ -315,6 +354,7 @@ export function registerDevelopmentRoutes(
     }
     return json(c, detail(database, run));
   });
+  registerRunResourceActionRoutes(app, database, hooks);
   app.openapi(answerClarificationRoute, (c) => {
     const runId = c.req.valid('param').runId;
     if (database.development.getRun(runId) === undefined) {
@@ -511,6 +551,16 @@ function detail(database: JobDatabase, run: DevelopmentRun) {
         created_at: evidence.createdAt,
       }),
     ),
+    resources: database.developmentResources.list(run.id).map((resource) => ({
+      kind: resource.kind.toLowerCase(),
+      provider: resource.provider,
+      external_id: resource.externalId,
+      state: resource.state.toLowerCase(),
+      generation: resource.generation,
+      last_error: resource.lastError,
+      observed_at: resource.observedAt,
+      updated_at: resource.updatedAt,
+    })),
     external_source:
       external === undefined
         ? null
@@ -529,6 +579,61 @@ function detail(database: JobDatabase, run: DevelopmentRun) {
             last_error: external.sync.lastError,
             updated_at: external.sync.updatedAt,
           },
+  });
+}
+
+function registerRunResourceActionRoutes(
+  app: OpenAPIHono,
+  database: JobDatabase,
+  hooks: ServerHooks,
+): void {
+  app.openapi(cancelRunRoute, async (c) => {
+    const runId = c.req.valid('param').runId;
+    if (database.development.getRun(runId) === undefined) {
+      return apiError(c, 404, 'development run not found', 'NOT_FOUND');
+    }
+    if (hooks.onDevelopmentRunCancelled === undefined) {
+      return apiError(c, 409, 'development runtime is not configured', 'DEVELOPMENT_UNAVAILABLE');
+    }
+    try {
+      await hooks.onDevelopmentRunCancelled(runId);
+      return json(
+        c,
+        developmentRunSummarySchema.parse(summary(database.development.requireRun(runId))),
+        202,
+      );
+    } catch (error) {
+      return apiError(
+        c,
+        409,
+        error instanceof Error ? error.message : 'development cancellation failed',
+        'DEVELOPMENT_CANCEL_FAILED',
+      );
+    }
+  });
+  app.openapi(cleanupRunRoute, async (c) => {
+    const runId = c.req.valid('param').runId;
+    if (database.development.getRun(runId) === undefined) {
+      return apiError(c, 404, 'development run not found', 'NOT_FOUND');
+    }
+    if (hooks.onDevelopmentRunCleanup === undefined) {
+      return apiError(c, 409, 'development runtime is not configured', 'DEVELOPMENT_UNAVAILABLE');
+    }
+    try {
+      await hooks.onDevelopmentRunCleanup(runId);
+      return json(
+        c,
+        developmentRunSummarySchema.parse(summary(database.development.requireRun(runId))),
+        202,
+      );
+    } catch (error) {
+      return apiError(
+        c,
+        409,
+        error instanceof Error ? error.message : 'development cleanup failed',
+        'DEVELOPMENT_CLEANUP_FAILED',
+      );
+    }
   });
 }
 

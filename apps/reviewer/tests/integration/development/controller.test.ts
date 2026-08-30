@@ -9,6 +9,7 @@ import type { DevelopmentSandboxManager } from '../../../src/sandbox/development
 import { DevelopmentController } from '../../../src/development/controller.js';
 import { openDatabase } from '../../../src/storage/connection.js';
 import { DevelopmentRepository } from '../../../src/storage/development-repository.js';
+import { DevelopmentResourceRepository } from '../../../src/storage/development-resource-repository.js';
 import { runMigrations } from '../../../src/storage/migrations/index.js';
 
 function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error } = {}) {
@@ -18,6 +19,13 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
   const run = repository.createRun({
     goal: 'Plan the smallest useful feature.',
     repository: 'example/leverframe',
+    checkout: {
+      baseSha: 'a'.repeat(40),
+      cloneUrl: 'https://github.com/example/leverframe.git',
+      defaultBranch: 'main',
+      installationId: 1,
+      repositoryId: 2,
+    },
   });
   const findOpenPullRequest = vi.fn().mockResolvedValue({
     number: 12,
@@ -39,6 +47,8 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
   const stop = vi.fn().mockResolvedValue(undefined);
   const enablePublication = vi.fn().mockResolvedValue(undefined);
   const disablePublication = vi.fn().mockResolvedValue(undefined);
+  const cleanup = vi.fn().mockResolvedValue(undefined);
+  const hasRetainedWorkspace = vi.fn().mockReturnValue(true);
   const candidateHash = 'c'.repeat(64);
   const sandbox = {
     prepare:
@@ -63,6 +73,8 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
     runVerification: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
     enablePublication,
     disablePublication,
+    cleanup,
+    hasRetainedWorkspace,
   } as unknown as DevelopmentSandboxManager;
   let onNotification: ((notification: AppServerNotification) => void) | undefined;
   let onRequest: ((request: AppServerRequest) => Promise<unknown>) | undefined;
@@ -133,12 +145,14 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
     github,
     launchAppServer,
     model: 'gpt-5.6-sol',
+    resources: new DevelopmentResourceRepository(database),
     sandbox,
     verificationCommand: 'pnpm check',
     workerId: 'test-worker',
   });
   return {
     close,
+    cleanup,
     getClarificationResponse: () => clarificationResponse,
     controller,
     database,
@@ -180,6 +194,63 @@ async function publishCandidate(context: ReturnType<typeof setup>): Promise<void
   });
 }
 
+describe('development restart recovery', () => {
+  it('reconstructs retained resource state without exposing host paths', async () => {
+    const context = setup();
+
+    await context.controller.recover();
+
+    expect(context.controller.options.resources.list(context.run.id)).toEqual([
+      expect.objectContaining({
+        kind: 'SANDBOX',
+        externalId: 'leverframe-dev-1',
+        state: 'UNKNOWN',
+      }),
+      expect.objectContaining({
+        kind: 'WORKSPACE',
+        externalId: 'development-workspace-1',
+        state: 'RETAINED',
+      }),
+      expect.objectContaining({
+        kind: 'BRANCH',
+        externalId: 'codex/development-1',
+        state: 'RETAINED',
+      }),
+    ]);
+  });
+
+  it('fences an execution interrupted by process restart', async () => {
+    const context = setup();
+    const preparing = context.repository.transition({
+      id: context.run.id,
+      expectedGeneration: context.run.generation,
+      expectedLockVersion: context.run.lockVersion,
+      phase: 'PREPARING',
+      advanceGeneration: true,
+      event: {
+        type: 'workspace_preparing',
+        source: 'LEVERFRAME',
+        trust: 'SYSTEM_OBSERVED',
+      },
+    });
+    context.repository.claimAttempt({
+      runId: preparing.id,
+      expectedGeneration: preparing.generation,
+      expectedLockVersion: preparing.lockVersion,
+      phase: 'PREPARING',
+      executorKind: 'DETERMINISTIC',
+      leaseOwner: 'dead-worker',
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    await context.controller.recover();
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe('FAILED');
+    expect(context.repository.findActiveAttempt(context.run.id)).toBeUndefined();
+    expect(context.stop).toHaveBeenCalledWith(context.run.id);
+  });
+});
+
 describe('DevelopmentController planning', () => {
   it('owns preparation and a Codex planning turn before requiring plan approval', async () => {
     const context = setup();
@@ -196,6 +267,11 @@ describe('DevelopmentController planning', () => {
     });
     expect(context.close).toHaveBeenCalledOnce();
     expect(context.stop).toHaveBeenCalledWith(context.run.id);
+    expect(context.controller.options.resources.list(context.run.id)).toMatchObject([
+      { kind: 'SANDBOX', state: 'STOPPED' },
+      { kind: 'WORKSPACE', state: 'RETAINED' },
+      { kind: 'BRANCH', state: 'RETAINED' },
+    ]);
     expect(context.controller.activeRuns).toEqual([]);
     context.database.close();
   });
@@ -253,6 +329,22 @@ describe('DevelopmentController planning', () => {
     expect(context.repository.requireRun(context.run.id).phase).toBe('FAILED');
     expect(context.repository.findActiveAttempt(context.run.id)).toBeUndefined();
     expect(context.stop).toHaveBeenCalledWith(context.run.id);
+    context.database.close();
+  });
+
+  it('cancels a waiting run and retains its resources', async () => {
+    const context = setup();
+    await context.controller.startPlanning(context.run.id);
+
+    await context.controller.cancelRun(context.run.id);
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe('CANCELLED');
+    expect(context.controller.options.resources.list(context.run.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'SANDBOX', state: 'STOPPED' }),
+        expect.objectContaining({ kind: 'WORKSPACE', state: 'RETAINED' }),
+      ]),
+    );
     context.database.close();
   });
 
@@ -411,6 +503,15 @@ describe('DevelopmentController planning', () => {
       repository: 'example/leverframe',
     });
     expect(context.repository.requireRun(context.run.id).phase).toBe('COMPLETED');
+    await context.controller.cleanupRun(context.run.id);
+    expect(context.cleanup).toHaveBeenCalledWith({
+      runId: context.run.id,
+      expectedBranch: `codex/development-${context.run.id}`,
+      integrated: true,
+    });
+    expect(context.controller.options.resources.list(context.run.id)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ state: 'CLEANED' })]),
+    );
     context.database.close();
   });
 });

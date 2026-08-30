@@ -63,6 +63,8 @@ export interface DevelopmentPullRequest {
   url: string;
 }
 
+export class GitHubRepositoryUnavailableError extends Error {}
+
 export type CheckConclusion = 'cancelled' | 'failure' | 'neutral' | 'success' | 'timed_out';
 
 export interface CheckOutput {
@@ -90,17 +92,34 @@ export class GitHubAppClient {
         owner,
         repo: repository,
       }),
-    );
+    ).catch((error: unknown) => {
+      if (githubErrorStatus(error) === 404) {
+        throw new GitHubRepositoryUnavailableError(
+          `repository ${input.repository} is not accessible to the GitHub App`,
+        );
+      }
+      throw error;
+    });
     if (
       installation.data.account?.id !== input.allowedOwnerId ||
       installation.data.suspended_at !== null
     ) {
-      throw new Error(`repository ${input.repository} is not accessible to the GitHub App`);
+      throw new GitHubRepositoryUnavailableError(
+        `repository ${input.repository} is not accessible to the GitHub App`,
+      );
     }
     const octokit = await this.#app.getInstallationOctokit(installation.data.id);
     const response = await this.#withRetry(() =>
       octokit.request('GET /repos/{owner}/{repo}', { owner, repo: repository }),
     );
+    if (
+      response.data.owner.id !== input.allowedOwnerId ||
+      response.data.full_name !== input.repository
+    ) {
+      throw new GitHubRepositoryUnavailableError(
+        `repository ${input.repository} identity changed during validation`,
+      );
+    }
     const branch = await this.#withRetry(() =>
       octokit.request('GET /repos/{owner}/{repo}/branches/{branch}', {
         owner,
@@ -115,6 +134,20 @@ export class GitHubAppClient {
       installationId: Number(installation.data.id),
       repositoryId: Number(response.data.id),
     };
+  }
+
+  async resolveRepository(input: {
+    allowedOwnerId: number;
+    repository: string;
+  }): Promise<RepositoryDetails | undefined> {
+    try {
+      return await this.getRepository(input);
+    } catch (error) {
+      if (error instanceof GitHubRepositoryUnavailableError) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   async isRepositoryAccessible(input: {

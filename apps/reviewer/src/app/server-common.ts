@@ -38,8 +38,19 @@ export interface ServerHooks {
   onManualCommand?: (command: ManualCommand) => Promise<{ status: string }>;
   onPullRequestCancelled?: (cancellation: PullRequestCancellationInput) => void;
   onDevelopmentRunCreated?: (runId: number) => void;
+  onDevelopmentRunCancelled?: (runId: number) => Promise<void>;
+  onDevelopmentRunCleanup?: (runId: number) => Promise<void>;
   listDevelopmentRepositories?: () => Promise<readonly DevelopmentRepository[]>;
-  validateDevelopmentRepository?: (repository: string) => Promise<boolean>;
+  resolveDevelopmentRepository?: (repository: string) => Promise<
+    | {
+        baseSha: string;
+        cloneUrl: string;
+        defaultBranch: string;
+        installationId: number;
+        repositoryId: number;
+      }
+    | undefined
+  >;
   listDevelopmentTickets?: () => Promise<readonly DevelopmentTicket[]>;
   importDevelopmentTicket?: (id: string) => Promise<DevelopmentTicketImport>;
   onDevelopmentClarificationAnswer?: (input: {

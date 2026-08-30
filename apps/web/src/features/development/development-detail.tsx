@@ -39,6 +39,7 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
   const router = useRouter();
   const [pendingInterruptId, setPendingInterruptId] = useState<number>();
   const [approvalError, setApprovalError] = useState<{ interruptId: number; message: string }>();
+  const { pendingRunAction, runAction } = useRunResourceAction(detail.run.id);
   const lastSequence = detail.events.at(-1)?.sequence ?? 0;
   const pending = pendingInterruptId === detail.interrupt?.id;
   const error =
@@ -122,22 +123,11 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <Link href="/development" className="text-sm text-muted-foreground hover:text-foreground">
-          ← {t('back')}
-        </Link>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {t('run')} #{detail.run.id}
-          </h1>
-          <Badge>{t(`phase_${detail.run.phase}`)}</Badge>
-        </div>
-        <p className="max-w-3xl text-sm text-muted-foreground">{detail.run.goal}</p>
-        <p className="text-sm text-muted-foreground">
-          {t('repository')}:{' '}
-          <span className="font-medium text-foreground">{detail.run.repository}</span>
-        </p>
-      </div>
+      <DevelopmentRunHeader
+        detail={detail}
+        pendingAction={pendingRunAction}
+        onAction={(action) => void runAction(action)}
+      />
       <Card>
         <CardHeader>
           <CardTitle>{t('graph')}</CardTitle>
@@ -333,9 +323,139 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
               )}
             </CardContent>
           </Card>
+          <DevelopmentResourcesCard detail={detail} />
         </div>
       </div>
     </div>
+  );
+}
+
+function useRunResourceAction(runId: number) {
+  const t = useTranslations('development');
+  const router = useRouter();
+  const [pendingRunAction, setPendingRunAction] = useState<'cancel' | 'cleanup'>();
+
+  async function runAction(action: 'cancel' | 'cleanup') {
+    if (!window.confirm(t(action === 'cancel' ? 'cancelConfirmation' : 'cleanupConfirmation'))) {
+      return;
+    }
+    setPendingRunAction(action);
+    const response = await fetch(`/api/v1/development/runs/${runId}/${action}`, { method: 'POST' });
+    if (!response.ok) {
+      setPendingRunAction(undefined);
+      window.alert(t(action === 'cancel' ? 'cancelFailed' : 'cleanupFailed'));
+      router.refresh();
+      return;
+    }
+    router.refresh();
+  }
+
+  return { pendingRunAction, runAction };
+}
+
+function DevelopmentRunHeader({
+  detail,
+  pendingAction,
+  onAction,
+}: {
+  detail: DevelopmentRunDetail;
+  pendingAction: 'cancel' | 'cleanup' | undefined;
+  onAction: (action: 'cancel' | 'cleanup') => void;
+}) {
+  const t = useTranslations('development');
+  return (
+    <div className="flex flex-col gap-2">
+      <Link href="/development" className="text-sm text-muted-foreground hover:text-foreground">
+        ← {t('back')}
+      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {t('run')} #{detail.run.id}
+        </h1>
+        <Badge>{t(`phase_${detail.run.phase}`)}</Badge>
+        <RunResourceActions detail={detail} pendingAction={pendingAction} onAction={onAction} />
+      </div>
+      <p className="max-w-3xl text-sm text-muted-foreground">{detail.run.goal}</p>
+      <p className="text-sm text-muted-foreground">
+        {t('repository')}:{' '}
+        <span className="font-medium text-foreground">{detail.run.repository}</span>
+      </p>
+    </div>
+  );
+}
+
+function RunResourceActions({
+  detail,
+  pendingAction,
+  onAction,
+}: {
+  detail: DevelopmentRunDetail;
+  pendingAction: 'cancel' | 'cleanup' | undefined;
+  onAction: (action: 'cancel' | 'cleanup') => void;
+}) {
+  const t = useTranslations('development');
+  if (!['completed', 'failed', 'cancelled'].includes(detail.run.phase)) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pendingAction !== undefined}
+        onClick={() => onAction('cancel')}
+      >
+        {pendingAction === 'cancel' ? <Spinner data-icon="inline-start" /> : null}
+        {t('cancelRun')}
+      </Button>
+    );
+  }
+  if (
+    detail.run.phase !== 'completed' ||
+    detail.resources.every((resource) => resource.state === 'cleaned')
+  ) {
+    return null;
+  }
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={pendingAction !== undefined}
+      onClick={() => onAction('cleanup')}
+    >
+      {pendingAction === 'cleanup' ? <Spinner data-icon="inline-start" /> : null}
+      {t('cleanupRun')}
+    </Button>
+  );
+}
+
+function DevelopmentResourcesCard({ detail }: { detail: DevelopmentRunDetail }) {
+  const t = useTranslations('development');
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('resources')}</CardTitle>
+        <CardDescription>{t('resourcesDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {detail.resources.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('noResources')}</p>
+        ) : (
+          detail.resources.map((resource) => (
+            <div key={resource.kind} className="flex items-center justify-between gap-3 text-sm">
+              <span className="flex min-w-0 flex-col">
+                <strong>{t(`resource_${resource.kind}`)}</strong>
+                <span className="truncate text-xs text-muted-foreground">
+                  {resource.external_id}
+                </span>
+              </span>
+              <Badge variant={resource.state === 'cleanup_failed' ? 'destructive' : 'outline'}>
+                {t(`resourceState_${resource.state}`)}
+              </Badge>
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
