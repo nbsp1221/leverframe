@@ -13,6 +13,14 @@ import { developmentSandboxName } from '../identity.js';
 const leaseMilliseconds = 10 * 60 * 1000;
 const turnTimeoutMilliseconds = 30 * 60 * 1000;
 
+export interface DevelopmentReviewFinding {
+  evidence: string;
+  file: string;
+  fingerprint: string;
+  line: number;
+  title: string;
+}
+
 export class DevelopmentController {
   readonly #active = new Map<number, { abort: AbortController; completion: Promise<void> }>();
   readonly #servers = new Map<number, CodexAppServer>();
@@ -113,7 +121,7 @@ export class DevelopmentController {
       event: observed('plan_approved'),
     });
     const abort = new AbortController();
-    const completion = this.implement(implementing.id, abort.signal)
+    const completion = this.implement(implementing.id, abort.signal, implementationPrompt)
       .catch((error: unknown) => this.fail(implementing.id, error))
       .finally(() => this.#active.delete(implementing.id));
     this.#active.set(implementing.id, { abort, completion });
@@ -140,6 +148,17 @@ export class DevelopmentController {
         `development run ${input.runId} is not awaiting this publication candidate`,
       );
     }
+    const interrupt = this.options.database.getOpenInterrupt(run.id);
+    if (
+      interrupt?.id !== input.interruptId ||
+      interrupt.kind !== 'PUBLICATION_APPROVAL' ||
+      interrupt.candidateHash !== input.candidateHash ||
+      interrupt.publicationKind === undefined
+    ) {
+      throw new DevelopmentControllerConflictError(
+        `development run ${input.runId} has no matching publication approval`,
+      );
+    }
     const publishing = this.options.database.decidePublicationApproval({
       runId: run.id,
       interruptId: input.interruptId,
@@ -154,7 +173,12 @@ export class DevelopmentController {
       return Promise.resolve();
     }
     const abort = new AbortController();
-    const completion = this.publish(publishing.id, input.candidateHash, abort.signal)
+    const completion = this.publish(
+      publishing.id,
+      input.candidateHash,
+      interrupt.publicationKind,
+      abort.signal,
+    )
       .catch((error: unknown) => this.fail(publishing.id, error))
       .finally(() => this.#active.delete(publishing.id));
     this.#active.set(publishing.id, { abort, completion });
@@ -183,6 +207,92 @@ export class DevelopmentController {
       answers: Object.fromEntries(
         Object.entries(input.answers).map(([id, answers]) => [id, { answers }]),
       ),
+    });
+  }
+
+  observeReviewCompleted(input: {
+    accepted: boolean;
+    findings: DevelopmentReviewFinding[];
+    headSha: string;
+    jobId: number;
+    pullRequestNumber: number;
+    repository: string;
+  }): Promise<void> {
+    const run = this.options.database.findRunByPullRequest(input);
+    if (run === undefined || run.phase !== 'REVIEWING') {
+      return Promise.resolve();
+    }
+    const pullRequest = this.options.database.getPullRequestReference(run.id);
+    if (pullRequest?.headSha !== input.headSha) {
+      return Promise.resolve();
+    }
+    if (input.findings.length === 0) {
+      if (!input.accepted) {
+        return Promise.resolve();
+      }
+      this.options.database.transition({
+        id: run.id,
+        expectedGeneration: run.generation,
+        expectedLockVersion: run.lockVersion,
+        phase: 'AWAITING_MERGE',
+        advanceGeneration: true,
+        event: observed('review_passed', {
+          head_sha: input.headSha,
+          review_job_id: input.jobId,
+        }),
+      });
+      return Promise.resolve();
+    }
+    if (this.#active.has(run.id)) {
+      throw new DevelopmentControllerConflictError(`development run ${run.id} is active`);
+    }
+    const implementing = this.options.database.transition({
+      id: run.id,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'IMPLEMENTING',
+      advanceGeneration: true,
+      event: observed('review_findings_received', {
+        finding_count: input.findings.length,
+        head_sha: input.headSha,
+        review_job_id: input.jobId,
+      }),
+    });
+    const abort = new AbortController();
+    const completion = this.implement(
+      implementing.id,
+      abort.signal,
+      reviewFixPrompt(input.findings),
+    )
+      .catch((error: unknown) => this.fail(implementing.id, error))
+      .finally(() => this.#active.delete(implementing.id));
+    this.#active.set(implementing.id, { abort, completion });
+    return completion;
+  }
+
+  observePullRequestMerged(input: {
+    headSha: string;
+    pullRequestNumber: number;
+    repository: string;
+  }): void {
+    const run = this.options.database.findRunByPullRequest(input);
+    if (run === undefined || run.phase !== 'AWAITING_MERGE') {
+      return;
+    }
+    const pullRequest = this.options.database.getPullRequestReference(run.id);
+    if (pullRequest?.headSha !== input.headSha) {
+      return;
+    }
+    this.options.database.transition({
+      id: run.id,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'COMPLETED',
+      advanceGeneration: true,
+      event: observed('pull_request_merged', {
+        head_sha: input.headSha,
+        pull_request: input.pullRequestNumber,
+      }),
     });
   }
 
@@ -307,7 +417,7 @@ export class DevelopmentController {
     }
   }
 
-  private async implement(runId: number, signal: AbortSignal): Promise<void> {
+  private async implement(runId: number, signal: AbortSignal, prompt: string): Promise<void> {
     let run = this.options.database.requireRun(runId);
     const attempt = this.options.database.claimAttempt({
       runId,
@@ -350,8 +460,7 @@ export class DevelopmentController {
       await server.resumeThread({ threadId, cwd: paths.workspaceDirectory });
       const turnId = await server.startTurn({
         threadId,
-        prompt:
-          'The operator approved the plan. Implement it completely, follow repository guidance, use the supplied commit skill for coherent local commits, and run repository-appropriate tests, lint, type checks, builds, and real QA. Do not push or create or modify a pull request.',
+        prompt,
         skills: [{ name: commitSkill.name, path: commitSkill.path }],
       });
       this.options.database.attachAttemptRuntime({
@@ -479,15 +588,21 @@ export class DevelopmentController {
       return;
     }
     run = this.options.database.requireRun(run.id);
+    const publicationKind =
+      this.options.database.getPullRequestReference(run.id) === undefined
+        ? 'PUSH_AND_PR'
+        : 'PUSH_EXISTING';
     this.options.database.requestPublicationApproval({
       runId: run.id,
       workRevisionId: run.workRevisionId,
       expectedGeneration: run.generation,
       expectedLockVersion: run.lockVersion,
       candidateHash,
-      publicationKind: 'PUSH_AND_PR',
+      publicationKind,
       prompt:
-        'Publish this exact verified candidate by pushing its branch and creating a pull request?',
+        publicationKind === 'PUSH_AND_PR'
+          ? 'Publish this exact verified candidate by pushing its branch and creating a pull request?'
+          : 'Publish this exact verified candidate by pushing one update to the existing pull request?',
     });
     await this.options.sandbox.stop(run.id).catch(() => undefined);
   }
@@ -495,6 +610,7 @@ export class DevelopmentController {
   private async publish(
     runId: number,
     approvedCandidateHash: string,
+    publicationKind: 'PUSH_AND_PR' | 'PUSH_EXISTING',
     signal: AbortSignal,
   ): Promise<void> {
     let run = this.options.database.requireRun(runId);
@@ -536,17 +652,25 @@ export class DevelopmentController {
       });
       this.#servers.set(run.id, server);
       await server.setSkillRoots([paths.skillsDirectory]);
-      const createPrSkill = (await server.listSkills(paths.workspaceDirectory)).find(
-        (skill) => skill.name === 'create-pr' && skill.enabled,
-      );
-      if (createPrSkill === undefined) {
+      const createPrSkill =
+        publicationKind === 'PUSH_AND_PR'
+          ? (await server.listSkills(paths.workspaceDirectory)).find(
+              (skill) => skill.name === 'create-pr' && skill.enabled,
+            )
+          : undefined;
+      if (publicationKind === 'PUSH_AND_PR' && createPrSkill === undefined) {
         throw new Error('run-specific create-pr skill is unavailable');
       }
       await server.resumeThread({ threadId, cwd: paths.workspaceDirectory });
       const turnId = await server.startTurn({
         threadId,
-        prompt: `The operator approved one publication of candidate ${approvedCandidateHash}. Use the supplied create-pr skill to push branch ${branch} and create its pull request. Do not modify source, create another branch, merge, deploy, or perform any other external write.`,
-        skills: [{ name: createPrSkill.name, path: createPrSkill.path }],
+        prompt:
+          publicationKind === 'PUSH_AND_PR'
+            ? `The operator approved one publication of candidate ${approvedCandidateHash}. Use the supplied create-pr skill to push branch ${branch} and create its pull request. Do not modify source, create another branch, merge, deploy, or perform any other external write.`
+            : `The operator approved one update of existing pull request branch ${branch} at candidate ${approvedCandidateHash}. Push that exact branch once. Do not create another pull request, modify source, merge, deploy, or perform any other external write.`,
+        ...(createPrSkill === undefined
+          ? {}
+          : { skills: [{ name: createPrSkill.name, path: createPrSkill.path }] }),
       });
       this.options.database.attachAttemptRuntime({
         id: attempt.id,
@@ -770,8 +894,22 @@ const clarificationRequestSchema = z.object({
 const developmentInstructions =
   'You are the implementation agent owned by Leverframe. Follow repository guidance. Ask only when ambiguity materially changes behavior or scope. Never push, create or modify a pull request, merge, deploy, or expose secrets without an explicit capability-bearing publication turn.';
 
+const implementationPrompt =
+  'The operator approved the plan. Implement it completely, follow repository guidance, use the supplied commit skill for coherent local commits, and run repository-appropriate tests, lint, type checks, builds, and real QA. Do not push or create or modify a pull request.';
+
 function planningPrompt(goal: string): string {
   return `Analyze the repository and propose the smallest coherent implementation plan for this accepted goal:\n\n${goal}\n\nDo not modify files in this planning turn. State material ambiguities as explicit questions. Otherwise provide a concrete plan, verification strategy, and risks for operator approval.`;
+}
+
+function reviewFixPrompt(findings: DevelopmentReviewFinding[]): string {
+  const boundedFindings = findings.slice(0, 50).map((finding) => ({
+    evidence: sanitize(finding.evidence, 4000),
+    file: sanitize(finding.file, 1000),
+    fingerprint: finding.fingerprint,
+    line: finding.line,
+    title: sanitize(finding.title, 1000),
+  }));
+  return `The existing Leverframe review found the following actionable issues on the current published candidate. Evaluate every finding against the code rather than trusting it blindly, fix only valid issues, preserve evidence for rejected findings, commit coherent changes with the supplied commit skill, and rerun repository-appropriate verification and real QA. Do not push or create or modify a pull request.\n\n${JSON.stringify(boundedFindings)}`;
 }
 
 function normalizedNotification(

@@ -15,6 +15,11 @@ import {
   mapDevelopmentRun,
 } from './development-mappers.js';
 import { type DevelopmentPhase, developmentPhaseTransitions } from './development-phases.js';
+import {
+  type DevelopmentPullRequestReference,
+  findRunByPullRequest,
+  getPullRequestReference,
+} from './development-pull-request-repository.js';
 
 export type { DevelopmentPhase } from './development-phases.js';
 
@@ -849,6 +854,17 @@ export class DevelopmentRepository {
         observedAt: now,
       });
     });
+  }
+
+  getPullRequestReference(runId: number): DevelopmentPullRequestReference | undefined {
+    return getPullRequestReference(this.database, runId);
+  }
+
+  findRunByPullRequest(input: {
+    repository: string;
+    pullRequestNumber: number;
+  }): DevelopmentRun | undefined {
+    return findRunByPullRequest(this.database, input);
   }
 
   private transitionWithinTransaction(input: {

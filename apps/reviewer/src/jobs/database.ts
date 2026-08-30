@@ -56,6 +56,7 @@ export interface PullRequestCancellationInput {
   deliveryId: string;
   headSha: string;
   installationId: number;
+  merged?: boolean;
   pullRequestNumber: number;
   repository: string;
 }

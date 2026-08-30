@@ -78,21 +78,6 @@ function serve(): void {
     dataRoot,
   });
   const traceStore = new ExecutionTraceStore(config.jobsDirectory);
-  const worker = new ReviewWorker({
-    allowedOwnerId: config.allowedOwnerId,
-    credentials,
-    database,
-    jobsDirectory: config.jobsDirectory,
-    reviewer: new SandboxReviewer({
-      model: config.model,
-      reasoningEffort: config.reasoningEffort,
-      resourcesDirectory: config.resourcesDirectory,
-      sandboxTemplate: config.sandboxTemplate,
-      traceStore,
-    }),
-  });
-  const threadWorker = new ThreadSideEffectWorker({ credentials, database });
-  const commandHandler = new ManualCommandHandler({ credentials, database, worker });
   const github = new GitHubAppClient(credentials.read());
   const developmentController =
     config.development === undefined
@@ -111,6 +96,37 @@ function serve(): void {
           verificationCommand: config.development.verificationCommand,
           workerId: `leverframe-${process.pid}`,
         });
+  const worker = new ReviewWorker({
+    allowedOwnerId: config.allowedOwnerId,
+    credentials,
+    database,
+    jobsDirectory: config.jobsDirectory,
+    onReviewCompleted: ({ accepted, findings, job }) => {
+      void developmentController?.observeReviewCompleted({
+        accepted,
+        findings: findings.map((finding) => ({
+          evidence: finding.evidence,
+          file: finding.file,
+          fingerprint: finding.fingerprint,
+          line: finding.line,
+          title: finding.title,
+        })),
+        headSha: job.headSha,
+        jobId: job.id,
+        pullRequestNumber: job.pullRequestNumber,
+        repository: job.repository,
+      });
+    },
+    reviewer: new SandboxReviewer({
+      model: config.model,
+      reasoningEffort: config.reasoningEffort,
+      resourcesDirectory: config.resourcesDirectory,
+      sandboxTemplate: config.sandboxTemplate,
+      traceStore,
+    }),
+  });
+  const threadWorker = new ThreadSideEffectWorker({ credentials, database });
+  const commandHandler = new ManualCommandHandler({ credentials, database, worker });
   const server = createLeverframeServer(
     config,
     database,
@@ -120,7 +136,12 @@ function serve(): void {
       isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,
       onJobQueued: (job) => worker.cancelSuperseded(job),
       onManualCommand: (command) => commandHandler.handle(command),
-      onPullRequestCancelled: (cancellation) => worker.cancelPullRequest(cancellation),
+      onPullRequestCancelled: (cancellation) => {
+        worker.cancelPullRequest(cancellation);
+        if (cancellation.merged === true) {
+          developmentController?.observePullRequestMerged(cancellation);
+        }
+      },
       getFindingContext: (input) => github.getFindingContext(input),
       ...(developmentController === undefined
         ? {}

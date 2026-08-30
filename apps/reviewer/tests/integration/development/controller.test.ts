@@ -67,42 +67,48 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
   let onNotification: ((notification: AppServerNotification) => void) | undefined;
   let onRequest: ((request: AppServerRequest) => Promise<unknown>) | undefined;
   let clarificationResponse: unknown;
+  const turnPrompts: string[] = [];
+  const turnSkills: Array<unknown[] | undefined> = [];
   const close = vi.fn();
-  const startTurn = vi.fn().mockImplementation(() => {
-    const turnId = '01990ef4-4c57-7000-8000-000000000002';
-    setTimeout(() => {
-      void (async () => {
-        if (input.clarifyDuringPlanning === true && startTurn.mock.calls.length === 1) {
-          clarificationResponse = await onRequest?.({
-            id: 'clarification-1',
-            method: 'item/tool/requestUserInput',
-            params: {
-              threadId: '01990ef4-4c57-7000-8000-000000000001',
-              turnId,
-              itemId: 'item-1',
-              isBlocking: true,
-              questions: [
-                {
-                  id: 'scope',
-                  header: 'Scope',
-                  question: 'Which surface should change?',
-                  isOther: true,
-                  isSecret: false,
-                  options: [{ label: 'Web', description: 'Change the dashboard.' }],
-                },
-              ],
-            },
+  const startTurn = vi
+    .fn()
+    .mockImplementation((turnInput: { prompt: string; skills?: unknown[] }) => {
+      turnPrompts.push(turnInput.prompt);
+      turnSkills.push(turnInput.skills);
+      const turnId = '01990ef4-4c57-7000-8000-000000000002';
+      setTimeout(() => {
+        void (async () => {
+          if (input.clarifyDuringPlanning === true && startTurn.mock.calls.length === 1) {
+            clarificationResponse = await onRequest?.({
+              id: 'clarification-1',
+              method: 'item/tool/requestUserInput',
+              params: {
+                threadId: '01990ef4-4c57-7000-8000-000000000001',
+                turnId,
+                itemId: 'item-1',
+                isBlocking: true,
+                questions: [
+                  {
+                    id: 'scope',
+                    header: 'Scope',
+                    question: 'Which surface should change?',
+                    isOther: true,
+                    isSecret: false,
+                    options: [{ label: 'Web', description: 'Change the dashboard.' }],
+                  },
+                ],
+              },
+            });
+          }
+          onNotification?.({
+            method: 'item/completed',
+            params: { item: { id: 'message-1', type: 'agentMessage', text: 'A bounded plan.' } },
           });
-        }
-        onNotification?.({
-          method: 'item/completed',
-          params: { item: { id: 'message-1', type: 'agentMessage', text: 'A bounded plan.' } },
-        });
-        onNotification?.({ method: 'turn/completed', params: {} });
-      })();
-    }, 0);
-    return Promise.resolve(turnId);
-  });
+          onNotification?.({ method: 'turn/completed', params: {} });
+        })();
+      }, 0);
+      return Promise.resolve(turnId);
+    });
   const appServer = {
     setSkillRoots: vi.fn().mockResolvedValue(undefined),
     listSkills: vi.fn().mockResolvedValue([
@@ -139,11 +145,39 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
     disablePublication,
     enablePublication,
     findOpenPullRequest,
+    getLastTurnPrompt: () => turnPrompts.at(-1),
+    getLastTurnSkills: () => turnSkills.at(-1),
     repository,
     run,
     sandbox,
+    startTurn,
     stop,
   };
+}
+
+async function publishCandidate(context: ReturnType<typeof setup>): Promise<void> {
+  await context.controller.startPlanning(context.run.id);
+  const plan = context.repository.getOpenInterrupt(context.run.id);
+  if (plan === undefined) {
+    throw new Error('plan approval was not created');
+  }
+  await context.controller.approvePlan({
+    runId: context.run.id,
+    interruptId: plan.id,
+    interruptLockVersion: plan.lockVersion,
+    approve: true,
+  });
+  const publication = context.repository.getOpenInterrupt(context.run.id);
+  if (publication?.candidateHash === undefined) {
+    throw new Error('publication approval was not created');
+  }
+  await context.controller.approvePublication({
+    runId: context.run.id,
+    interruptId: publication.id,
+    interruptLockVersion: publication.lockVersion,
+    candidateHash: publication.candidateHash,
+    approve: true,
+  });
 }
 
 describe('DevelopmentController planning', () => {
@@ -290,6 +324,93 @@ describe('DevelopmentController planning', () => {
         .listEvents(context.run.id)
         .some((event) => event.type === 'pull_request_observed'),
     ).toBe(true);
+    context.database.close();
+  });
+
+  it('returns actionable review findings to the same thread and requires one existing-PR push approval', async () => {
+    const context = setup();
+    await publishCandidate(context);
+
+    await context.controller.observeReviewCompleted({
+      accepted: false,
+      findings: [
+        {
+          evidence: 'The stale branch is still reachable.',
+          file: 'src/example.ts',
+          fingerprint: '1234567890abcdef',
+          line: 12,
+          title: 'Remove stale branch',
+        },
+      ],
+      headSha: 'b'.repeat(40),
+      jobId: 9,
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe(
+      'AWAITING_PUBLICATION_APPROVAL',
+    );
+    expect(context.repository.getOpenInterrupt(context.run.id)).toMatchObject({
+      kind: 'PUBLICATION_APPROVAL',
+      publicationKind: 'PUSH_EXISTING',
+    });
+    expect(context.getLastTurnPrompt()).toContain('rather than trusting it blindly');
+    expect(context.getLastTurnPrompt()).toContain('1234567890abcdef');
+
+    const publication = context.repository.getOpenInterrupt(context.run.id);
+    if (publication?.candidateHash === undefined) {
+      throw new Error('existing pull request publication approval was not created');
+    }
+    await context.controller.approvePublication({
+      runId: context.run.id,
+      interruptId: publication.id,
+      interruptLockVersion: publication.lockVersion,
+      candidateHash: publication.candidateHash,
+      approve: true,
+    });
+    expect(context.getLastTurnPrompt()).toContain('approved one update of existing pull request');
+    expect(context.getLastTurnSkills()).toBeUndefined();
+    context.database.close();
+  });
+
+  it('waits for and observes a merge only after the current review has no actionable findings', async () => {
+    const context = setup();
+    await publishCandidate(context);
+
+    await context.controller.observeReviewCompleted({
+      accepted: false,
+      findings: [],
+      headSha: 'b'.repeat(40),
+      jobId: 9,
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+    expect(context.repository.requireRun(context.run.id).phase).toBe('REVIEWING');
+
+    await context.controller.observeReviewCompleted({
+      accepted: true,
+      findings: [],
+      headSha: 'b'.repeat(40),
+      jobId: 10,
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+    expect(context.repository.requireRun(context.run.id).phase).toBe('AWAITING_MERGE');
+
+    context.controller.observePullRequestMerged({
+      headSha: 'd'.repeat(40),
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+    expect(context.repository.requireRun(context.run.id).phase).toBe('AWAITING_MERGE');
+
+    context.controller.observePullRequestMerged({
+      headSha: 'b'.repeat(40),
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+    expect(context.repository.requireRun(context.run.id).phase).toBe('COMPLETED');
     context.database.close();
   });
 });

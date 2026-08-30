@@ -51,6 +51,11 @@ export class ReviewWorker {
       credentials: CredentialStore;
       database: JobDatabase;
       jobsDirectory: string;
+      onReviewCompleted?: (input: {
+        accepted: boolean;
+        findings: ReturnType<JobDatabase['getReviewFindings']>;
+        job: ReviewJob;
+      }) => void;
       reviewer: SandboxReviewer;
     },
   ) {}
@@ -437,6 +442,19 @@ export class ReviewWorker {
       });
       if (!completed) {
         throw new Error('review job could not enter DONE');
+      }
+      try {
+        this.options.onReviewCompleted?.({
+          accepted: reviewConclusion(review.result) === 'success',
+          findings: this.options.database
+            .getReviewFindings(job.repository, job.pullRequestNumber)
+            .filter((finding) => finding.state !== 'FIXED'),
+          job,
+        });
+      } catch (error) {
+        console.error(
+          `development review observation failed for job ${job.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
       logCompletion(job, reviewId);
     } catch (error) {
