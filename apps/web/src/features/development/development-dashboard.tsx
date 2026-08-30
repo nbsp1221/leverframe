@@ -1,4 +1,8 @@
-import type { DevelopmentRepository, DevelopmentRunSummary } from '@repo/contracts';
+import type {
+  DevelopmentRepository,
+  DevelopmentRunSummary,
+  DevelopmentTicket,
+} from '@repo/contracts';
 import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
 import { Badge } from '@repo/ui/components/badge';
 import {
@@ -16,9 +20,11 @@ import { DevelopmentCreateForm } from './development-create-form';
 export async function DevelopmentDashboard({
   runs,
   repositories,
+  tickets,
 }: {
   runs: DevelopmentRunSummary[] | null;
   repositories: DevelopmentRepository[] | null;
+  tickets: DevelopmentTicket[] | null;
 }) {
   const t = await getTranslations('development');
   const attentionCount = runs?.filter((run) => run.operator_action !== null).length ?? 0;
@@ -106,7 +112,7 @@ export async function DevelopmentDashboard({
                 <AlertDescription>{t('repositoryCatalogEmptyDescription')}</AlertDescription>
               </Alert>
             ) : (
-              <DevelopmentCreateForm repositories={repositories} />
+              <DevelopmentCreateForm repositories={repositories} tickets={tickets} />
             )}
           </CardContent>
         </Card>

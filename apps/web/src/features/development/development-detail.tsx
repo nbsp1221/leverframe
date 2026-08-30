@@ -133,6 +133,10 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
           <Badge>{t(`phase_${detail.run.phase}`)}</Badge>
         </div>
         <p className="max-w-3xl text-sm text-muted-foreground">{detail.run.goal}</p>
+        <p className="text-sm text-muted-foreground">
+          {t('repository')}:{' '}
+          <span className="font-medium text-foreground">{detail.run.repository}</span>
+        </p>
       </div>
       <Card>
         <CardHeader>
@@ -193,6 +197,54 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
           </CardContent>
         </Card>
         <div className="flex flex-col gap-6">
+          {detail.external_source === null ? null : (
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('externalSource')}</CardTitle>
+                <CardDescription>{t('externalSourceDescription')}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 text-sm">
+                <span className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{detail.external_source.provider}</span>
+                  {detail.external_source.url === null ? (
+                    <strong>{detail.external_source.key ?? detail.external_source.id}</strong>
+                  ) : (
+                    <a
+                      className="font-medium underline-offset-4 hover:underline"
+                      href={detail.external_source.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {detail.external_source.key ?? detail.external_source.id}
+                    </a>
+                  )}
+                </span>
+                {detail.external_sync === null ? (
+                  <p className="text-muted-foreground">{t('externalSyncPending')}</p>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <span className="flex items-center justify-between gap-3">
+                      <span>{t('externalSync')}</span>
+                      <Badge
+                        variant={
+                          detail.external_sync.state === 'confirmed' ? 'secondary' : 'outline'
+                        }
+                      >
+                        {detail.external_sync.status}
+                      </Badge>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {t(`externalSyncState_${detail.external_sync.state}`)} ·{' '}
+                      {new Date(detail.external_sync.updated_at).toLocaleString()}
+                    </span>
+                    {detail.external_sync.last_error === null ? null : (
+                      <p className="text-xs text-destructive">{detail.external_sync.last_error}</p>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
           {detail.interrupt?.kind === 'clarification' && detail.interrupt.questions !== null ? (
             <ClarificationCard
               interrupt={{ ...detail.interrupt, questions: detail.interrupt.questions }}

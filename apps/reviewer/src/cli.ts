@@ -15,6 +15,8 @@ import { DevelopmentSandboxManager } from './sandbox/development.js';
 import { recoverOrphanSandboxes } from './sandbox/recovery.js';
 import { SandboxReviewer } from './sandbox/reviewer.js';
 import { preflightSandboxRuntime, sandboxRuntimeAvailable } from './sandbox/runtime.js';
+import { MulticaCliTicketAdapter } from './tickets/multica-cli.js';
+import { TicketProjectionWorker } from './tickets/projection-worker.js';
 
 interface PackageMetadata {
   version: string;
@@ -79,6 +81,10 @@ function serve(): void {
   });
   const traceStore = new ExecutionTraceStore(config.jobsDirectory);
   const github = new GitHubAppClient(credentials.read());
+  const ticketAdapter =
+    config.multicaCliPath === null || config.multicaCliPath === undefined
+      ? undefined
+      : new MulticaCliTicketAdapter({ cliPath: config.multicaCliPath });
   const developmentController = new DevelopmentController({
     allowedOwnerId: config.allowedOwnerId,
     database: database.development,
@@ -93,6 +99,14 @@ function serve(): void {
     verificationCommand: config.development.verificationCommand,
     workerId: `leverframe-${process.pid}`,
   });
+  const ticketProjectionWorker =
+    ticketAdapter === undefined
+      ? undefined
+      : new TicketProjectionWorker({
+          adapter: ticketAdapter,
+          database: database.development,
+          projections: database.developmentProjections,
+        });
   const worker = new ReviewWorker({
     allowedOwnerId: config.allowedOwnerId,
     credentials,
@@ -152,6 +166,45 @@ function serve(): void {
           repository,
         });
       },
+      ...(ticketAdapter === undefined
+        ? {}
+        : {
+            listDevelopmentTickets: async () =>
+              (await ticketAdapter.listTickets({ limit: 100, offset: 0 })).map((ticket) => ({
+                id: ticket.id,
+                key: ticket.key,
+                priority: ticket.priority,
+                project_id: ticket.projectId,
+                status: ticket.status,
+                title: ticket.title,
+              })),
+            importDevelopmentTicket: async (id: string) => {
+              const [ticket, repositories] = await Promise.all([
+                ticketAdapter.getTicket(id),
+                github.listRepositories(config.allowedOwnerId),
+              ]);
+              const accessible = new Set(repositories.map((repository) => repository.repository));
+              return {
+                id: ticket.id,
+                key: ticket.key,
+                priority: ticket.priority,
+                project_id: ticket.projectId,
+                status: ticket.status,
+                title: ticket.title,
+                goal: [ticket.title, ticket.description].filter(Boolean).join('\n\n'),
+                repository_suggestions: ticket.repositorySuggestions.map((repository) => ({
+                  accessible: accessible.has(repository),
+                  repository,
+                })),
+                external_source: {
+                  provider: 'multica' as const,
+                  id: ticket.id,
+                  key: ticket.key,
+                  url: ticket.url,
+                },
+              };
+            },
+          }),
       onDevelopmentRunCreated: (runId: number) => {
         void developmentController.startPlanning(runId);
       },
@@ -193,7 +246,12 @@ function serve(): void {
     });
     void (async () => {
       try {
-        await Promise.all([worker.stop(), threadWorker.stop(), developmentController.stop()]);
+        await Promise.all([
+          worker.stop(),
+          threadWorker.stop(),
+          developmentController.stop(),
+          ticketProjectionWorker?.stop(),
+        ]);
         server.closeAllConnections();
         await serverClosed;
         database.close();
@@ -211,6 +269,7 @@ function serve(): void {
 
   server.listen(config.port, config.host, () => {
     console.log(`Leverframe listening on http://${config.host}:${config.port}`);
+    ticketProjectionWorker?.start();
     void startWorkersAfterRecovery(
       config.sandboxTemplate,
       config.jobsDirectory,

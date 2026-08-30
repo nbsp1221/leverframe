@@ -2,9 +2,11 @@ import {
   type DevelopmentRepository,
   type DevelopmentRunDetail,
   type DevelopmentRunSummary,
+  type DevelopmentTicket,
   developmentRepositoryListSchema,
   developmentRunDetailSchema,
   developmentRunListSchema,
+  developmentTicketListSchema,
 } from '@repo/contracts';
 
 export type DevelopmentDataResult<T> =
@@ -61,6 +63,25 @@ export async function getDevelopmentRepositories(): Promise<
       return { kind: 'http-error', status: response.status };
     }
     const parsed = developmentRepositoryListSchema.safeParse(await response.json());
+    return parsed.success ? { kind: 'ok', data: parsed.data.items } : { kind: 'schema-error' };
+  } catch {
+    return { kind: 'network-error' };
+  }
+}
+
+export async function getDevelopmentTickets(): Promise<DevelopmentDataResult<DevelopmentTicket[]>> {
+  const base = reviewerBase();
+  if (base === undefined) {
+    return { kind: 'missing-config' };
+  }
+  try {
+    const response = await fetch(new URL('api/v1/development/tickets', base), {
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      return { kind: 'http-error', status: response.status };
+    }
+    const parsed = developmentTicketListSchema.safeParse(await response.json());
     return parsed.success ? { kind: 'ok', data: parsed.data.items } : { kind: 'schema-error' };
   } catch {
     return { kind: 'network-error' };

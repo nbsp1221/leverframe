@@ -1,5 +1,7 @@
 import type {
   DevelopmentRepository,
+  DevelopmentTicket,
+  DevelopmentTicketImport,
   dependencyStatusSchema,
   reviewStatusSchema,
 } from '@repo/contracts';
@@ -38,6 +40,8 @@ export interface ServerHooks {
   onDevelopmentRunCreated?: (runId: number) => void;
   listDevelopmentRepositories?: () => Promise<readonly DevelopmentRepository[]>;
   validateDevelopmentRepository?: (repository: string) => Promise<boolean>;
+  listDevelopmentTickets?: () => Promise<readonly DevelopmentTicket[]>;
+  importDevelopmentTicket?: (id: string) => Promise<DevelopmentTicketImport>;
   onDevelopmentClarificationAnswer?: (input: {
     runId: number;
     interruptId: number;

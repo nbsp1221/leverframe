@@ -363,6 +363,28 @@ export const developmentRepositoryQuerySchema = z.object({
   per_page: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+export const developmentTicketSchema = z.object({
+  id: z.string().uuid(),
+  key: z.string().min(1),
+  title: z.string().min(1),
+  status: z.string().min(1),
+  priority: z.string().nullable(),
+  project_id: z.string().uuid().nullable(),
+});
+
+export const developmentTicketListSchema = z.object({ items: z.array(developmentTicketSchema) });
+
+export const developmentTicketImportSchema = developmentTicketSchema.extend({
+  goal: z.string().min(1),
+  repository_suggestions: z.array(z.object({ repository: z.string(), accessible: z.boolean() })),
+  external_source: z.object({
+    provider: z.literal('multica'),
+    id: z.string().uuid(),
+    key: z.string().min(1),
+    url: z.url().nullable(),
+  }),
+});
+
 export const developmentRunCreateSchema = z.object({
   goal: z.string().trim().min(1).max(20_000),
   repository: z
@@ -489,6 +511,22 @@ export const developmentRunDetailSchema = z.object({
   events: z.array(developmentEventSchema),
   interrupt: developmentInterruptSchema.nullable(),
   evidence: z.array(developmentEvidenceSchema),
+  external_source: z
+    .object({
+      provider: z.string().min(1),
+      id: z.string().min(1),
+      key: z.string().nullable(),
+      url: z.url().nullable(),
+    })
+    .nullable(),
+  external_sync: z
+    .object({
+      status: z.string().min(1),
+      state: z.enum(['pending', 'performing', 'unknown', 'confirmed', 'failed', 'cancelled']),
+      last_error: z.string().nullable(),
+      updated_at: isoDate,
+    })
+    .nullable(),
 });
 
 export const developmentRunListSchema = z.object({
@@ -511,6 +549,8 @@ export type DeleteEvaluationRequest = z.infer<typeof deleteEvaluationRequestSche
 export type ContextResponse = z.infer<typeof contextResponseSchema>;
 export type DevelopmentPhase = z.infer<typeof developmentPhaseSchema>;
 export type DevelopmentRepository = z.infer<typeof developmentRepositorySchema>;
+export type DevelopmentTicket = z.infer<typeof developmentTicketSchema>;
+export type DevelopmentTicketImport = z.infer<typeof developmentTicketImportSchema>;
 export type DevelopmentRunCreate = z.infer<typeof developmentRunCreateSchema>;
 export type DevelopmentRunSummary = z.infer<typeof developmentRunSummarySchema>;
 export type DevelopmentEvent = z.infer<typeof developmentEventSchema>;

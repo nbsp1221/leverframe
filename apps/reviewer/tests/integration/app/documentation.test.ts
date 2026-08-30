@@ -115,6 +115,8 @@ describe('agent-readable API documentation', () => {
         'getReviewExecution',
         'streamReviewExecution',
         'listDevelopmentRepositories',
+        'listDevelopmentTickets',
+        'importDevelopmentTicket',
         'listDevelopmentRuns',
         'createDevelopmentRun',
         'getDevelopmentRun',
@@ -124,7 +126,7 @@ describe('agent-readable API documentation', () => {
         'resolveDevelopmentPublicationApproval',
       ]),
     );
-    expect(operationIds).toHaveLength(19);
+    expect(operationIds).toHaveLength(21);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
@@ -178,6 +180,13 @@ describe('agent-readable API documentation', () => {
         'get',
         '/api/v1/development/repositories',
         'listDevelopmentRepositories',
+        ['200', '422', '503'],
+      ],
+      ['get', '/api/v1/development/tickets', 'listDevelopmentTickets', ['200', '503']],
+      [
+        'get',
+        '/api/v1/development/tickets/{ticketId}/import',
+        'importDevelopmentTicket',
         ['200', '422', '503'],
       ],
       ['get', '/api/v1/development/runs', 'listDevelopmentRuns', ['200']],

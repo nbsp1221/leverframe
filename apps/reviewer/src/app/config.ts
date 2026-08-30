@@ -73,6 +73,7 @@ const serverConfigSchema = z.object({
     createPrSkillDirectory: z.string().min(1),
     verificationCommand: z.string().trim().min(1).max(2000),
   }),
+  multicaCliPath: z.string().min(1).nullable().optional(),
 });
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
@@ -136,5 +137,6 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
         environment.DEVELOPMENT_CREATE_PR_SKILL_DIRECTORY ?? '/agent-skills/create-pr',
       verificationCommand: environment.DEVELOPMENT_VERIFICATION_COMMAND ?? 'pnpm check',
     },
+    multicaCliPath: environment.MULTICA_CLI_PATH?.trim() || null,
   });
 }

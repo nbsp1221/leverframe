@@ -72,6 +72,43 @@ async function fixture(input: { hooks?: ServerHooks } = {}) {
 }
 
 describe('development API', () => {
+  it('keeps external tickets optional and imports suggestions without granting access', async () => {
+    const ticket = {
+      id: '1e9eb5d7-496f-4d9a-8a7d-0f31a7724502',
+      key: 'PER-59',
+      priority: 'high',
+      project_id: '0d5d20d6-dcda-4fdc-98e8-0edcab345486',
+      status: 'in_progress',
+      title: 'Build the graph',
+    };
+    const { url } = await fixture({
+      hooks: {
+        listDevelopmentTickets: vi.fn().mockResolvedValue([ticket]),
+        importDevelopmentTicket: vi.fn().mockResolvedValue({
+          ...ticket,
+          goal: 'Build the graph\n\nAcceptance context',
+          repository_suggestions: [
+            { repository: 'owner/allowed', accessible: true },
+            { repository: 'owner/not-installed', accessible: false },
+          ],
+          external_source: { provider: 'multica', id: ticket.id, key: ticket.key, url: null },
+        }),
+      },
+    });
+
+    await expect((await fetch(`${url}/api/v1/development/tickets`)).json()).resolves.toEqual({
+      items: [ticket],
+    });
+    const imported = await fetch(`${url}/api/v1/development/tickets/PER-59/import`);
+    expect(imported.status).toBe(200);
+    await expect(imported.json()).resolves.toMatchObject({
+      repository_suggestions: [
+        { repository: 'owner/allowed', accessible: true },
+        { repository: 'owner/not-installed', accessible: false },
+      ],
+    });
+  });
+
   it('lists only repositories supplied by the GitHub App catalog', async () => {
     const listDevelopmentRepositories = vi
       .fn()
@@ -141,8 +178,46 @@ describe('development API', () => {
       await (await fetch(`${url}/api/v1/development/runs/${created.id}`)).json(),
     );
     expect(detail.run).toEqual(created);
+    expect(detail.external_source).toBeNull();
+    expect(detail.external_sync).toBeNull();
     expect(detail.events[0]).toMatchObject({ type: 'run_created', trust: 'human_decided' });
     expect(JSON.stringify(detail)).not.toMatch(/(?:\/home\/|\/tmp\/|private[_ -]?key)/i);
+  });
+
+  it('shows the imported ticket and latest durable projection on run detail', async () => {
+    const { database, url } = await fixture();
+    const run = database.development.createRun({
+      repository: 'owner/repo',
+      goal: 'Imported work.',
+      externalSource: {
+        provider: 'multica',
+        id: '1e9eb5d7-496f-4d9a-8a7d-0f31a7724502',
+        key: 'PER-59',
+        url: 'https://multica.example.test/issues/PER-59',
+      },
+    });
+    database.developmentProjections.enqueue(
+      run.id,
+      'multica',
+      '1e9eb5d7-496f-4d9a-8a7d-0f31a7724502',
+      'started',
+    );
+    const intent = database.developmentProjections.claim('multica');
+    if (intent === undefined) {
+      throw new Error('fixture projection intent missing');
+    }
+    database.developmentProjections.finish(intent.id, true);
+
+    const detail = developmentRunDetailSchema.parse(
+      await (await fetch(`${url}/api/v1/development/runs/${run.id}`)).json(),
+    );
+    expect(detail.external_source).toEqual({
+      provider: 'multica',
+      id: '1e9eb5d7-496f-4d9a-8a7d-0f31a7724502',
+      key: 'PER-59',
+      url: 'https://multica.example.test/issues/PER-59',
+    });
+    expect(detail.external_sync).toMatchObject({ status: 'started', state: 'confirmed' });
   });
 
   it('accepts only the current plan approval revision', async () => {

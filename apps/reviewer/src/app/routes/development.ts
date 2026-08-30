@@ -14,6 +14,8 @@ import {
   developmentRunIdParamsSchema,
   developmentRunListSchema,
   developmentRunSummarySchema,
+  developmentTicketImportSchema,
+  developmentTicketListSchema,
   errorResponseSchema,
 } from '@repo/contracts';
 import { streamSSE } from 'hono/streaming';
@@ -50,6 +52,32 @@ const repositoryListRoute = createRoute({
     200: jsonResponse(developmentRepositoryListSchema, 'Accessible repositories.'),
     422: jsonResponse(errorResponseSchema, 'The catalog query is invalid.'),
     503: jsonResponse(errorResponseSchema, 'The GitHub App repository catalog is unavailable.'),
+  },
+});
+
+const ticketListRoute = createRoute({
+  method: 'get',
+  path: '/api/v1/development/tickets',
+  operationId: 'listDevelopmentTickets',
+  tags: ['Development'],
+  summary: 'List optional external tickets available for import',
+  responses: {
+    200: jsonResponse(developmentTicketListSchema, 'Importable tickets.'),
+    503: jsonResponse(errorResponseSchema, 'The optional ticket adapter is unavailable.'),
+  },
+});
+
+const ticketImportRoute = createRoute({
+  method: 'get',
+  path: '/api/v1/development/tickets/{ticketId}/import',
+  operationId: 'importDevelopmentTicket',
+  tags: ['Development'],
+  summary: 'Read one external ticket as non-authoritative development input',
+  request: { params: z.object({ ticketId: z.string().min(1).max(255) }) },
+  responses: {
+    200: jsonResponse(developmentTicketImportSchema, 'Ticket import snapshot.'),
+    422: jsonResponse(errorResponseSchema, 'The ticket identifier is invalid.'),
+    503: jsonResponse(errorResponseSchema, 'The optional ticket adapter is unavailable.'),
   },
 });
 
@@ -178,6 +206,36 @@ export function registerDevelopmentRoutes(
   database: JobDatabase,
   hooks: ServerHooks,
 ): void {
+  app.openapi(ticketListRoute, async (c) => {
+    if (hooks.listDevelopmentTickets === undefined) {
+      return apiError(c, 503, 'ticket adapter is not configured', 'TICKET_ADAPTER_UNAVAILABLE');
+    }
+    try {
+      return json(
+        c,
+        developmentTicketListSchema.parse({ items: await hooks.listDevelopmentTickets() }),
+      );
+    } catch (error) {
+      console.error('failed to list development tickets', error);
+      return apiError(c, 503, 'ticket adapter is unavailable', 'TICKET_ADAPTER_UNAVAILABLE');
+    }
+  });
+  app.openapi(ticketImportRoute, async (c) => {
+    if (hooks.importDevelopmentTicket === undefined) {
+      return apiError(c, 503, 'ticket adapter is not configured', 'TICKET_ADAPTER_UNAVAILABLE');
+    }
+    try {
+      return json(
+        c,
+        developmentTicketImportSchema.parse(
+          await hooks.importDevelopmentTicket(c.req.valid('param').ticketId),
+        ),
+      );
+    } catch (error) {
+      console.error('failed to import development ticket', error);
+      return apiError(c, 503, 'ticket adapter is unavailable', 'TICKET_ADAPTER_UNAVAILABLE');
+    }
+  });
   app.openapi(repositoryListRoute, async (c) => {
     if (hooks.listDevelopmentRepositories === undefined) {
       return apiError(c, 503, 'repository catalog is not configured', 'CATALOG_UNAVAILABLE');
@@ -404,6 +462,7 @@ export function registerDevelopmentRoutes(
 
 function detail(database: JobDatabase, run: DevelopmentRun) {
   const interrupt = database.development.getOpenInterrupt(run.id);
+  const external = database.developmentProjections.getExternalStatus(run.id);
   return developmentRunDetailSchema.parse({
     run: summary(run),
     events: database.development.listEvents(run.id).map((event) =>
@@ -452,6 +511,24 @@ function detail(database: JobDatabase, run: DevelopmentRun) {
         created_at: evidence.createdAt,
       }),
     ),
+    external_source:
+      external === undefined
+        ? null
+        : {
+            provider: external.source.provider,
+            id: external.source.id,
+            key: external.source.key,
+            url: external.source.url,
+          },
+    external_sync:
+      external?.sync === null || external?.sync === undefined
+        ? null
+        : {
+            status: external.sync.status,
+            state: external.sync.state.toLowerCase(),
+            last_error: external.sync.lastError,
+            updated_at: external.sync.updatedAt,
+          },
   });
 }
 
