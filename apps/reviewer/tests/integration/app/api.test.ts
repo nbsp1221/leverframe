@@ -33,6 +33,11 @@ const config = {
   reasoningEffort: 'low' as const,
   resourcesDirectory: '/unused',
   sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
+  development: {
+    commitSkillDirectory: '/agent-skills/commit',
+    createPrSkillDirectory: '/agent-skills/create-pr',
+    verificationCommand: 'pnpm check',
+  },
 };
 const result = {
   coverage: {

@@ -1,4 +1,5 @@
-import type { DevelopmentRunSummary } from '@repo/contracts';
+import type { DevelopmentRepository, DevelopmentRunSummary } from '@repo/contracts';
+import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
 import { Badge } from '@repo/ui/components/badge';
 import {
   Card,
@@ -14,18 +15,27 @@ import { DevelopmentCreateForm } from './development-create-form';
 
 export async function DevelopmentDashboard({
   runs,
-  repository,
+  repositories,
 }: {
   runs: DevelopmentRunSummary[] | null;
-  repository: string;
+  repositories: DevelopmentRepository[] | null;
 }) {
   const t = await getTranslations('development');
+  const attentionCount = runs?.filter((run) => run.operator_action !== null).length ?? 0;
+  const activeCount =
+    runs?.filter((run) => !['completed', 'failed', 'cancelled'].includes(run.phase)).length ?? 0;
+  const orderedRuns = runs === null ? null : [...runs].sort(compareRuns);
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div className="flex flex-col gap-1">
         <p className="text-sm font-medium text-muted-foreground">development-v1</p>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{t('title')}</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">{t('subtitle')}</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SummaryCard label={t('activeRuns')} value={activeCount} />
+        <SummaryCard label={t('needsAttention')} value={attentionCount} />
+        <SummaryCard label={t('availableRepositories')} value={repositories?.length ?? 0} />
       </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <Card>
@@ -34,14 +44,14 @@ export async function DevelopmentDashboard({
             <CardDescription>{t('runsDescription')}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {runs === null ? (
+            {orderedRuns === null ? (
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>{t('unavailable')}</EmptyTitle>
                   <EmptyDescription>{t('unavailableDescription')}</EmptyDescription>
                 </EmptyHeader>
               </Empty>
-            ) : runs.length === 0 ? (
+            ) : orderedRuns.length === 0 ? (
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>{t('empty')}</EmptyTitle>
@@ -49,7 +59,7 @@ export async function DevelopmentDashboard({
                 </EmptyHeader>
               </Empty>
             ) : (
-              runs.map((run) => (
+              orderedRuns.map((run) => (
                 <Link
                   key={run.id}
                   href={`/development/${run.id}`}
@@ -85,10 +95,48 @@ export async function DevelopmentDashboard({
             <CardDescription>{t('newRunDescription')}</CardDescription>
           </CardHeader>
           <CardContent>
-            <DevelopmentCreateForm repository={repository} />
+            {repositories === null ? (
+              <Alert variant="destructive">
+                <AlertTitle>{t('repositoryCatalogUnavailable')}</AlertTitle>
+                <AlertDescription>{t('repositoryCatalogUnavailableDescription')}</AlertDescription>
+              </Alert>
+            ) : repositories.length === 0 ? (
+              <Alert>
+                <AlertTitle>{t('repositoryCatalogEmpty')}</AlertTitle>
+                <AlertDescription>{t('repositoryCatalogEmptyDescription')}</AlertDescription>
+              </Alert>
+            ) : (
+              <DevelopmentCreateForm repositories={repositories} />
+            )}
           </CardContent>
         </Card>
       </div>
     </div>
   );
+}
+
+function SummaryCard({ label, value }: { label: string; value: number }) {
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-between py-4">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="text-2xl font-semibold tabular-nums">{value}</span>
+      </CardContent>
+    </Card>
+  );
+}
+
+function compareRuns(left: DevelopmentRunSummary, right: DevelopmentRunSummary): number {
+  const rank = (run: DevelopmentRunSummary) => {
+    if (run.operator_action !== null) {
+      return 0;
+    }
+    if (!['completed', 'failed', 'cancelled'].includes(run.phase)) {
+      return 1;
+    }
+
+    return 2;
+  };
+
+  return rank(left) - rank(right) || right.last_activity_at.localeCompare(left.last_activity_at);
 }

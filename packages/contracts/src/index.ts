@@ -347,6 +347,22 @@ export const developmentRunIdParamsSchema = z.object({
   runId: z.coerce.number().int().positive(),
 });
 
+export const developmentRepositorySchema = z.object({
+  repository: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
+  default_branch: z.string().min(1),
+  private: z.boolean(),
+});
+
+export const developmentRepositoryListSchema = z.object({
+  items: z.array(developmentRepositorySchema),
+});
+
+export const developmentRepositoryQuerySchema = z.object({
+  q: z.string().trim().max(200).default(''),
+  page: z.coerce.number().int().positive().default(1),
+  per_page: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 export const developmentRunCreateSchema = z.object({
   goal: z.string().trim().min(1).max(20_000),
   repository: z
@@ -494,6 +510,7 @@ export type FindingEvaluationWriteRequest = z.infer<typeof findingEvaluationWrit
 export type DeleteEvaluationRequest = z.infer<typeof deleteEvaluationRequestSchema>;
 export type ContextResponse = z.infer<typeof contextResponseSchema>;
 export type DevelopmentPhase = z.infer<typeof developmentPhaseSchema>;
+export type DevelopmentRepository = z.infer<typeof developmentRepositorySchema>;
 export type DevelopmentRunCreate = z.infer<typeof developmentRunCreateSchema>;
 export type DevelopmentRunSummary = z.infer<typeof developmentRunSummarySchema>;
 export type DevelopmentEvent = z.infer<typeof developmentEventSchema>;

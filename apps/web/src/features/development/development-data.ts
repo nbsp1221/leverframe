@@ -1,6 +1,8 @@
 import {
+  type DevelopmentRepository,
   type DevelopmentRunDetail,
   type DevelopmentRunSummary,
+  developmentRepositoryListSchema,
   developmentRunDetailSchema,
   developmentRunListSchema,
 } from '@repo/contracts';
@@ -36,6 +38,29 @@ export async function getDevelopmentRuns(): Promise<
       return { kind: 'http-error', status: response.status };
     }
     const parsed = developmentRunListSchema.safeParse(await response.json());
+    return parsed.success ? { kind: 'ok', data: parsed.data.items } : { kind: 'schema-error' };
+  } catch {
+    return { kind: 'network-error' };
+  }
+}
+
+export async function getDevelopmentRepositories(): Promise<
+  DevelopmentDataResult<DevelopmentRepository[]>
+> {
+  const base = reviewerBase();
+  if (base === undefined) {
+    return { kind: 'missing-config' };
+  }
+  try {
+    const url = new URL('api/v1/development/repositories', base);
+    url.searchParams.set('per_page', '100');
+    const response = await fetch(url, {
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      return { kind: 'http-error', status: response.status };
+    }
+    const parsed = developmentRepositoryListSchema.safeParse(await response.json());
     return parsed.success ? { kind: 'ok', data: parsed.data.items } : { kind: 'schema-error' };
   } catch {
     return { kind: 'network-error' };

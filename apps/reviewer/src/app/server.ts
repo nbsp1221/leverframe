@@ -100,7 +100,7 @@ function createApi(
   };
 
   registerGitHubRoutes(app, config, database, credentials, hooks, observed);
-  registerDevelopmentRoutes(app, database, hooks, config.development?.repository);
+  registerDevelopmentRoutes(app, database, hooks);
   registerReviewRoutes(app, database, hooks, observations, recordRead);
   registerReviewExecutionRoutes(app, database, traceStore, recordRead);
 

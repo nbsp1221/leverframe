@@ -104,7 +104,7 @@ describe('server configuration', () => {
     });
   });
 
-  it('enables one local development repository with conservative defaults', () => {
+  it('enables development for the GitHub App repository catalog with conservative defaults', () => {
     expect(
       loadServerConfig({
         APP_UI_BASE_URL: 'https://leverframe.retn0.dev',
@@ -112,10 +112,8 @@ describe('server configuration', () => {
         GITHUB_ALLOWED_OWNER_ID: '42',
         GITHUB_APP_NAME: 'example-leverframe-app',
         REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
-        DEVELOPMENT_REPOSITORY: 'nbsp1221/leverframe',
       }).development,
     ).toEqual({
-      repository: 'nbsp1221/leverframe',
       commitSkillDirectory: '/agent-skills/commit',
       createPrSkillDirectory: '/agent-skills/create-pr',
       verificationCommand: 'pnpm check',
@@ -129,16 +127,9 @@ describe('server configuration', () => {
       GITHUB_ALLOWED_OWNER_ID: '42',
       GITHUB_APP_NAME: 'example-leverframe-app',
       REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
-      DEVELOPMENT_REPOSITORY: 'not-a-repository',
+      DEVELOPMENT_VERIFICATION_COMMAND: '   ',
     };
     expect(() => loadServerConfig(environment)).toThrow();
-    expect(() =>
-      loadServerConfig({
-        ...environment,
-        DEVELOPMENT_REPOSITORY: 'nbsp1221/leverframe',
-        DEVELOPMENT_VERIFICATION_COMMAND: '   ',
-      }),
-    ).toThrow();
   });
 
   it('rejects unsupported reasoning effort instead of silently falling back', () => {

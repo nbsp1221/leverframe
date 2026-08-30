@@ -42,6 +42,11 @@ async function fixture(): Promise<string> {
       reasoningEffort: 'low',
       resourcesDirectory: join(directory, 'resources'),
       sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
+      development: {
+        commitSkillDirectory: '/agent-skills/commit',
+        createPrSkillDirectory: '/agent-skills/create-pr',
+        verificationCommand: 'pnpm check',
+      },
     },
     database,
     credentials,
@@ -109,6 +114,7 @@ describe('agent-readable API documentation', () => {
         'getFindingContext',
         'getReviewExecution',
         'streamReviewExecution',
+        'listDevelopmentRepositories',
         'listDevelopmentRuns',
         'createDevelopmentRun',
         'getDevelopmentRun',
@@ -118,7 +124,7 @@ describe('agent-readable API documentation', () => {
         'resolveDevelopmentPublicationApproval',
       ]),
     );
-    expect(operationIds).toHaveLength(18);
+    expect(operationIds).toHaveLength(19);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
@@ -168,8 +174,14 @@ describe('agent-readable API documentation', () => {
         'streamReviewExecution',
         ['200', '404', '422'],
       ],
+      [
+        'get',
+        '/api/v1/development/repositories',
+        'listDevelopmentRepositories',
+        ['200', '422', '503'],
+      ],
       ['get', '/api/v1/development/runs', 'listDevelopmentRuns', ['200']],
-      ['post', '/api/v1/development/runs', 'createDevelopmentRun', ['201', '409', '422']],
+      ['post', '/api/v1/development/runs', 'createDevelopmentRun', ['201', '409', '422', '503']],
       ['get', '/api/v1/development/runs/{runId}', 'getDevelopmentRun', ['200', '404', '422']],
       [
         'post',

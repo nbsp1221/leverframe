@@ -22,7 +22,7 @@ afterEach(() => {
   }
 });
 
-async function fixture(input: { configured?: boolean; hooks?: ServerHooks } = {}) {
+async function fixture(input: { hooks?: ServerHooks } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'leverframe-development-api-'));
   const credentials = new CredentialStore(directory);
   credentials.write({
@@ -49,16 +49,11 @@ async function fixture(input: { configured?: boolean; hooks?: ServerHooks } = {}
       reasoningEffort: 'low',
       resourcesDirectory: '/unused',
       sandboxTemplate,
-      ...(input.configured
-        ? {
-            development: {
-              repository: 'owner/repo',
-              commitSkillDirectory: '/agent-skills/commit',
-              createPrSkillDirectory: '/agent-skills/create-pr',
-              verificationCommand: 'pnpm check',
-            },
-          }
-        : {}),
+      development: {
+        commitSkillDirectory: '/agent-skills/commit',
+        createPrSkillDirectory: '/agent-skills/create-pr',
+        verificationCommand: 'pnpm check',
+      },
     },
     database,
     credentials,
@@ -77,6 +72,39 @@ async function fixture(input: { configured?: boolean; hooks?: ServerHooks } = {}
 }
 
 describe('development API', () => {
+  it('lists only repositories supplied by the GitHub App catalog', async () => {
+    const listDevelopmentRepositories = vi
+      .fn()
+      .mockResolvedValue([{ default_branch: 'main', private: true, repository: 'owner/private' }]);
+    const { url } = await fixture({ hooks: { listDevelopmentRepositories } });
+
+    const response = await fetch(`${url}/api/v1/development/repositories`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      items: [{ default_branch: 'main', private: true, repository: 'owner/private' }],
+    });
+  });
+
+  it('rejects run creation when the GitHub App cannot access the selected repository', async () => {
+    const onDevelopmentRunCreated = vi.fn();
+    const { url } = await fixture({
+      hooks: {
+        onDevelopmentRunCreated,
+        validateDevelopmentRepository: vi.fn().mockResolvedValue(false),
+      },
+    });
+
+    const response = await fetch(`${url}/api/v1/development/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repository: 'owner/public-but-not-installed', goal: 'No access.' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(onDevelopmentRunCreated).not.toHaveBeenCalled();
+  });
+
   it('fails closed when the local development runtime is not configured', async () => {
     const { url } = await fixture();
     const response = await fetch(`${url}/api/v1/development/runs`, {
@@ -89,7 +117,12 @@ describe('development API', () => {
 
   it('creates, lists, and reads a web-native run without a ticket provider', async () => {
     const onDevelopmentRunCreated = vi.fn();
-    const { url } = await fixture({ configured: true, hooks: { onDevelopmentRunCreated } });
+    const { url } = await fixture({
+      hooks: {
+        onDevelopmentRunCreated,
+        validateDevelopmentRepository: vi.fn().mockResolvedValue(true),
+      },
+    });
     const response = await fetch(`${url}/api/v1/development/runs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -115,7 +148,6 @@ describe('development API', () => {
   it('accepts only the current plan approval revision', async () => {
     const onDevelopmentPlanApproval = vi.fn();
     const { database, url } = await fixture({
-      configured: true,
       hooks: { onDevelopmentPlanApproval },
     });
     let run = database.development.createRun({ repository: 'owner/repo', goal: 'Plan it.' });
@@ -165,7 +197,6 @@ describe('development API', () => {
   it('renders and accepts the current clarification questions without exposing secrets', async () => {
     const onDevelopmentClarificationAnswer = vi.fn();
     const { database, url } = await fixture({
-      configured: true,
       hooks: { onDevelopmentClarificationAnswer },
     });
     let run = database.development.createRun({ repository: 'owner/repo', goal: 'Clarify it.' });

@@ -1,12 +1,18 @@
 import { DevelopmentDashboard } from '../../../src/features/development/development-dashboard';
-import { getDevelopmentRuns } from '../../../src/features/development/development-data';
+import {
+  getDevelopmentRepositories,
+  getDevelopmentRuns,
+} from '../../../src/features/development/development-data';
 
 export default async function DevelopmentPage() {
-  const result = await getDevelopmentRuns();
+  const [runResult, repositoryResult] = await Promise.all([
+    getDevelopmentRuns(),
+    getDevelopmentRepositories(),
+  ]);
   return (
     <DevelopmentDashboard
-      runs={result.kind === 'ok' ? result.data : null}
-      repository={process.env.DEVELOPMENT_REPOSITORY ?? ''}
+      runs={runResult.kind === 'ok' ? runResult.data : null}
+      repositories={repositoryResult.kind === 'ok' ? repositoryResult.data : null}
     />
   );
 }

@@ -79,30 +79,27 @@ function serve(): void {
   });
   const traceStore = new ExecutionTraceStore(config.jobsDirectory);
   const github = new GitHubAppClient(credentials.read());
-  const developmentController =
-    config.development === undefined
-      ? undefined
-      : new DevelopmentController({
-          allowedOwnerId: config.allowedOwnerId,
-          database: database.development,
-          github,
-          model: config.model,
-          sandbox: new DevelopmentSandboxManager({
-            dataDirectory: dataRoot,
-            sandboxTemplate: config.sandboxTemplate,
-            commitSkillDirectory: config.development.commitSkillDirectory,
-            createPrSkillDirectory: config.development.createPrSkillDirectory,
-          }),
-          verificationCommand: config.development.verificationCommand,
-          workerId: `leverframe-${process.pid}`,
-        });
+  const developmentController = new DevelopmentController({
+    allowedOwnerId: config.allowedOwnerId,
+    database: database.development,
+    github,
+    model: config.model,
+    sandbox: new DevelopmentSandboxManager({
+      dataDirectory: dataRoot,
+      sandboxTemplate: config.sandboxTemplate,
+      commitSkillDirectory: config.development.commitSkillDirectory,
+      createPrSkillDirectory: config.development.createPrSkillDirectory,
+    }),
+    verificationCommand: config.development.verificationCommand,
+    workerId: `leverframe-${process.pid}`,
+  });
   const worker = new ReviewWorker({
     allowedOwnerId: config.allowedOwnerId,
     credentials,
     database,
     jobsDirectory: config.jobsDirectory,
     onReviewCompleted: ({ accepted, findings, job }) => {
-      void developmentController?.observeReviewCompleted({
+      void developmentController.observeReviewCompleted({
         accepted,
         findings: findings.map((finding) => ({
           evidence: finding.evidence,
@@ -139,32 +136,38 @@ function serve(): void {
       onPullRequestCancelled: (cancellation) => {
         worker.cancelPullRequest(cancellation);
         if (cancellation.merged === true) {
-          developmentController?.observePullRequestMerged(cancellation);
+          developmentController.observePullRequestMerged(cancellation);
         }
       },
       getFindingContext: (input) => github.getFindingContext(input),
-      ...(developmentController === undefined
-        ? {}
-        : {
-            onDevelopmentRunCreated: (runId: number) => {
-              void developmentController.startPlanning(runId);
-            },
-            onDevelopmentClarificationAnswer: (
-              input: Parameters<DevelopmentController['answerClarification']>[0],
-            ) => {
-              developmentController.answerClarification(input);
-            },
-            onDevelopmentPlanApproval: (
-              input: Parameters<DevelopmentController['approvePlan']>[0],
-            ) => {
-              void developmentController.approvePlan(input);
-            },
-            onDevelopmentPublicationApproval: (
-              input: Parameters<DevelopmentController['approvePublication']>[0],
-            ) => {
-              void developmentController.approvePublication(input);
-            },
-          }),
+      listDevelopmentRepositories: async () =>
+        (await github.listRepositories(config.allowedOwnerId)).map((repository) => ({
+          default_branch: repository.defaultBranch,
+          private: repository.private,
+          repository: repository.repository,
+        })),
+      validateDevelopmentRepository: async (repository) => {
+        return github.isRepositoryAccessible({
+          allowedOwnerId: config.allowedOwnerId,
+          repository,
+        });
+      },
+      onDevelopmentRunCreated: (runId: number) => {
+        void developmentController.startPlanning(runId);
+      },
+      onDevelopmentClarificationAnswer: (
+        input: Parameters<DevelopmentController['answerClarification']>[0],
+      ) => {
+        developmentController.answerClarification(input);
+      },
+      onDevelopmentPlanApproval: (input: Parameters<DevelopmentController['approvePlan']>[0]) => {
+        void developmentController.approvePlan(input);
+      },
+      onDevelopmentPublicationApproval: (
+        input: Parameters<DevelopmentController['approvePublication']>[0],
+      ) => {
+        void developmentController.approvePublication(input);
+      },
     },
     traceStore,
   );
@@ -190,7 +193,7 @@ function serve(): void {
     });
     void (async () => {
       try {
-        await Promise.all([worker.stop(), threadWorker.stop(), developmentController?.stop()]);
+        await Promise.all([worker.stop(), threadWorker.stop(), developmentController.stop()]);
         server.closeAllConnections();
         await serverClosed;
         database.close();

@@ -73,6 +73,86 @@ describe('GitHub retry classification', () => {
   });
 });
 
+describe('development repository catalog', () => {
+  it('lists only active installations for the allowed owner and sorts repositories', async () => {
+    githubMocks.appRequest.mockResolvedValueOnce({
+      data: [
+        { account: { id: 7 }, id: 41, suspended_at: null },
+        { account: { id: 8 }, id: 42, suspended_at: null },
+        { account: { id: 7 }, id: 43, suspended_at: '2026-08-30T00:00:00Z' },
+      ],
+    });
+    githubMocks.installationRequest.mockResolvedValueOnce({
+      data: {
+        repositories: [
+          { default_branch: 'main', full_name: 'owner/zeta', id: 2, private: true },
+          { default_branch: 'trunk', full_name: 'owner/alpha', id: 1, private: false },
+        ],
+      },
+    });
+
+    await expect(createAppClient().listRepositories(7)).resolves.toEqual([
+      { defaultBranch: 'trunk', private: false, repository: 'owner/alpha' },
+      { defaultBranch: 'main', private: true, repository: 'owner/zeta' },
+    ]);
+    expect(githubMocks.getInstallationOctokit).toHaveBeenCalledTimes(1);
+    expect(githubMocks.getInstallationOctokit).toHaveBeenCalledWith(41);
+  });
+
+  it('requires an exact active repository installation before resolving checkout facts', async () => {
+    githubMocks.appRequest.mockResolvedValueOnce({
+      data: { account: { id: 7 }, id: 41, suspended_at: null },
+    });
+    githubMocks.installationRequest
+      .mockResolvedValueOnce({
+        data: {
+          clone_url: 'https://github.com/owner/project.git',
+          default_branch: 'main',
+          id: 9,
+        },
+      })
+      .mockResolvedValueOnce({ data: { commit: { sha: 'a'.repeat(40) } } });
+
+    await expect(
+      createAppClient().getRepository({ allowedOwnerId: 7, repository: 'owner/project' }),
+    ).resolves.toEqual({
+      cloneUrl: 'https://github.com/owner/project.git',
+      defaultBranch: 'main',
+      defaultBranchSha: 'a'.repeat(40),
+      installationId: 41,
+      repositoryId: 9,
+    });
+    expect(githubMocks.appRequest).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/installation', {
+      owner: 'owner',
+      repo: 'project',
+    });
+  });
+
+  it('rejects a repository installed for a different owner before requesting repository data', async () => {
+    githubMocks.appRequest.mockResolvedValueOnce({
+      data: { account: { id: 8 }, id: 41, suspended_at: null },
+    });
+
+    await expect(
+      createAppClient().getRepository({ allowedOwnerId: 7, repository: 'owner/project' }),
+    ).rejects.toThrow('not accessible to the GitHub App');
+    expect(githubMocks.getInstallationOctokit).not.toHaveBeenCalled();
+  });
+
+  it('reports an exact missing installation as inaccessible', async () => {
+    githubMocks.appRequest.mockRejectedValueOnce(
+      Object.assign(new Error('Not Found'), { status: 404 }),
+    );
+
+    await expect(
+      createAppClient().isRepositoryAccessible({
+        allowedOwnerId: 7,
+        repository: 'owner/public-but-not-installed',
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
 describe('manual command authorization', () => {
   it('accepts triage-or-higher roles and rejects read-only roles', () => {
     expect(canManageRepositoryRole('triage')).toBe(true);
@@ -348,6 +428,17 @@ function resolveThread(client: GitHubReviewThreadClient) {
 
 function createClient(): GitHubReviewThreadClient {
   return new GitHubReviewThreadClient({
+    appId: 1,
+    clientId: 'client',
+    name: 'leverframe',
+    privateKey: 'private-key',
+    slug: 'leverframe',
+    webhookSecret: 'secret',
+  });
+}
+
+function createAppClient(): GitHubAppClient {
+  return new GitHubAppClient({
     appId: 1,
     clientId: 'client',
     name: 'leverframe',

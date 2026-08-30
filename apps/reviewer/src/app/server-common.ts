@@ -1,4 +1,8 @@
-import type { dependencyStatusSchema, reviewStatusSchema } from '@repo/contracts';
+import type {
+  DevelopmentRepository,
+  dependencyStatusSchema,
+  reviewStatusSchema,
+} from '@repo/contracts';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
@@ -32,6 +36,8 @@ export interface ServerHooks {
   onManualCommand?: (command: ManualCommand) => Promise<{ status: string }>;
   onPullRequestCancelled?: (cancellation: PullRequestCancellationInput) => void;
   onDevelopmentRunCreated?: (runId: number) => void;
+  listDevelopmentRepositories?: () => Promise<readonly DevelopmentRepository[]>;
+  validateDevelopmentRepository?: (repository: string) => Promise<boolean>;
   onDevelopmentClarificationAnswer?: (input: {
     runId: number;
     interruptId: number;

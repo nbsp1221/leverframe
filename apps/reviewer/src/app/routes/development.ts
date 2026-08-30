@@ -7,6 +7,8 @@ import {
   developmentInterruptSchema,
   developmentPlanApprovalSchema,
   developmentPublicationApprovalSchema,
+  developmentRepositoryListSchema,
+  developmentRepositoryQuerySchema,
   developmentRunCreateSchema,
   developmentRunDetailSchema,
   developmentRunIdParamsSchema,
@@ -37,6 +39,20 @@ const listRoute = createRoute({
   responses: { 200: jsonResponse(developmentRunListSchema, 'Development runs.') },
 });
 
+const repositoryListRoute = createRoute({
+  method: 'get',
+  path: '/api/v1/development/repositories',
+  operationId: 'listDevelopmentRepositories',
+  tags: ['Development'],
+  summary: 'List repositories explicitly accessible to the Leverframe GitHub App',
+  request: { query: developmentRepositoryQuerySchema },
+  responses: {
+    200: jsonResponse(developmentRepositoryListSchema, 'Accessible repositories.'),
+    422: jsonResponse(errorResponseSchema, 'The catalog query is invalid.'),
+    503: jsonResponse(errorResponseSchema, 'The GitHub App repository catalog is unavailable.'),
+  },
+});
+
 const createRunRoute = createRoute({
   method: 'post',
   path: '/api/v1/development/runs',
@@ -55,6 +71,7 @@ const createRunRoute = createRoute({
       errorResponseSchema,
       'Development is unavailable or the repository is not configured.',
     ),
+    503: jsonResponse(errorResponseSchema, 'GitHub App access could not be verified.'),
     422: jsonResponse(errorResponseSchema, 'The request is invalid.'),
   },
 });
@@ -160,24 +177,59 @@ export function registerDevelopmentRoutes(
   app: OpenAPIHono,
   database: JobDatabase,
   hooks: ServerHooks,
-  configuredRepository?: string,
 ): void {
+  app.openapi(repositoryListRoute, async (c) => {
+    if (hooks.listDevelopmentRepositories === undefined) {
+      return apiError(c, 503, 'repository catalog is not configured', 'CATALOG_UNAVAILABLE');
+    }
+    try {
+      const items = await hooks.listDevelopmentRepositories();
+      const query = c.req.valid('query');
+      const normalizedQuery = query.q.toLocaleLowerCase('en-US');
+      const matching =
+        normalizedQuery === ''
+          ? items
+          : items.filter((item) =>
+              item.repository.toLocaleLowerCase('en-US').includes(normalizedQuery),
+            );
+      const offset = (query.page - 1) * query.per_page;
+      return json(
+        c,
+        developmentRepositoryListSchema.parse({
+          items: matching.slice(offset, offset + query.per_page),
+        }),
+      );
+    } catch (error) {
+      console.error('failed to list development repositories', error);
+      return apiError(c, 503, 'repository catalog is unavailable', 'CATALOG_UNAVAILABLE');
+    }
+  });
   app.openapi(listRoute, (c) =>
     json(
       c,
       developmentRunListSchema.parse({ items: database.development.listRuns().map(summary) }),
     ),
   );
-  app.openapi(createRunRoute, (c) => {
-    if (configuredRepository === undefined || hooks.onDevelopmentRunCreated === undefined) {
+  app.openapi(createRunRoute, async (c) => {
+    if (
+      hooks.onDevelopmentRunCreated === undefined ||
+      hooks.validateDevelopmentRepository === undefined
+    ) {
       return apiError(c, 409, 'development runtime is not configured', 'DEVELOPMENT_UNAVAILABLE');
     }
     const input = c.req.valid('json');
-    if (input.repository !== configuredRepository) {
+    let accessible: boolean;
+    try {
+      accessible = await hooks.validateDevelopmentRepository(input.repository);
+    } catch (error) {
+      console.error('failed to validate development repository', error);
+      return apiError(c, 503, 'repository access could not be verified', 'GITHUB_UNAVAILABLE');
+    }
+    if (!accessible) {
       return apiError(
         c,
         409,
-        'repository is not configured for development',
+        'repository is not accessible to the GitHub App',
         'REPOSITORY_UNAVAILABLE',
       );
     }
