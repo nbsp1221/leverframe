@@ -24,7 +24,7 @@ services:
       - ${HOME}/.config/com.docker.sandboxes:/home/node/.config/com.docker.sandboxes
       - ${HOME}/.config/sandboxes:/home/node/.config/sandboxes
       - ${HOME}/.local/state/sandboxes/sandboxes/sandboxd:/home/node/.local/state/sandboxes/sandboxes/sandboxd:ro
-      - ${HOME}/.codex/skills:/agent-skills:ro
+      - ${HOME}/.agents/skills:/agent-skills:ro
     healthcheck:
       test:
         [

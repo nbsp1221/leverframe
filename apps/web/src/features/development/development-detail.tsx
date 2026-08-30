@@ -37,9 +37,14 @@ const phases = [
 export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail }) {
   const t = useTranslations('development');
   const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string>();
+  const [pendingInterruptId, setPendingInterruptId] = useState<number>();
+  const [approvalError, setApprovalError] = useState<{ interruptId: number; message: string }>();
   const lastSequence = detail.events.at(-1)?.sequence ?? 0;
+  const pending = pendingInterruptId === detail.interrupt?.id;
+  const error =
+    approvalError !== undefined && approvalError.interruptId === detail.interrupt?.id
+      ? approvalError.message
+      : undefined;
 
   useEffect(() => {
     if (['completed', 'failed', 'cancelled'].includes(detail.run.phase)) {
@@ -68,8 +73,8 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
     }
     const rawResponse = formData.get('response');
     const approvalResponse = typeof rawResponse === 'string' ? rawResponse.trim() : '';
-    setPending(true);
-    setError(undefined);
+    setPendingInterruptId(interrupt.id);
+    setApprovalError(undefined);
     const response = await fetch(`/api/v1/development/runs/${detail.run.id}/plan-approval`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -81,8 +86,8 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
       }),
     });
     if (!response.ok) {
-      setError(t('approvalFailed'));
-      setPending(false);
+      setApprovalError({ interruptId: interrupt.id, message: t('approvalFailed') });
+      setPendingInterruptId(undefined);
       router.refresh();
       return;
     }
@@ -94,8 +99,8 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
     if (interrupt?.kind !== 'publication_approval' || interrupt.candidate_hash === null) {
       return;
     }
-    setPending(true);
-    setError(undefined);
+    setPendingInterruptId(interrupt.id);
+    setApprovalError(undefined);
     const response = await fetch(`/api/v1/development/runs/${detail.run.id}/publication-approval`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -107,8 +112,8 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
       }),
     });
     if (!response.ok) {
-      setError(t('approvalFailed'));
-      setPending(false);
+      setApprovalError({ interruptId: interrupt.id, message: t('approvalFailed') });
+      setPendingInterruptId(undefined);
       router.refresh();
       return;
     }
@@ -207,7 +212,7 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
                         <AlertTitle>{error}</AlertTitle>
                       </Alert>
                     ) : null}
-                    <Button disabled={pending}>
+                    <Button type="submit" disabled={pending}>
                       {pending ? <Spinner data-icon="inline-start" /> : null}
                       {t('approveAndImplement')}
                     </Button>
