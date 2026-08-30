@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import type { ReviewResult } from '../review/result.js';
 import { openDatabase } from '../storage/connection.js';
+import { DevelopmentRepository } from '../storage/development-repository.js';
 import {
   EvaluationRepository,
   type EvaluationRevision,
@@ -165,6 +166,7 @@ export class JobDatabase {
   readonly #evaluationRepository: EvaluationRepository;
   readonly #githubThreadRepository: GitHubThreadRepository;
   readonly #reviewRepository: ReviewRepository;
+  readonly development: DevelopmentRepository;
 
   constructor(path: string, options: { dataRoot?: string } = {}) {
     const dataRoot = resolve(
@@ -177,6 +179,7 @@ export class JobDatabase {
     this.#evaluationRepository = new EvaluationRepository(this.#database, (jobId) =>
       this.getReviewArtifact(jobId),
     );
+    this.development = new DevelopmentRepository(this.#database);
     this.#reviewRepository.backfillArtifacts();
     this.#database.exec(`
       UPDATE review_jobs

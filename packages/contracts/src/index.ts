@@ -326,6 +326,106 @@ export const errorResponseSchema = z.object({
   details: z.unknown().optional(),
 });
 
+export const developmentPhaseSchema = z.enum([
+  'intake',
+  'preparing',
+  'planning',
+  'awaiting_plan_approval',
+  'implementing',
+  'verifying',
+  'awaiting_publication_approval',
+  'publishing',
+  'reviewing',
+  'awaiting_merge',
+  'waiting_for_input',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+export const developmentRunIdParamsSchema = z.object({
+  runId: z.coerce.number().int().positive(),
+});
+
+export const developmentRunCreateSchema = z.object({
+  goal: z.string().trim().min(1).max(20_000),
+  repository: z
+    .string()
+    .trim()
+    .regex(/^[^/\s]+\/[^/\s]+$/),
+  external_source: z
+    .object({
+      provider: z.string().trim().min(1).max(80),
+      id: z.string().trim().min(1).max(255),
+      key: z.string().trim().min(1).max(255).nullable(),
+      url: z.url().nullable(),
+    })
+    .optional(),
+});
+
+export const developmentRunSummarySchema = z.object({
+  id: z.number().int().positive(),
+  workflow: z.literal('development-v1'),
+  repository: z.string(),
+  phase: developmentPhaseSchema,
+  prior_phase: developmentPhaseSchema.nullable(),
+  generation: z.number().int().positive(),
+  revision: z.number().int().positive(),
+  goal: z.string(),
+  candidate_hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
+  operator_action: z.enum(['answer', 'approve_plan', 'approve_publication']).nullable(),
+  last_activity_at: isoDate,
+  created_at: isoDate,
+  updated_at: isoDate,
+});
+
+export const developmentEventTrustSchema = z.enum([
+  'system_observed',
+  'harness_observed',
+  'agent_claimed',
+  'human_decided',
+]);
+
+export const developmentEventSchema = z.object({
+  schema_version: z.literal(1),
+  sequence: z.number().int().positive(),
+  generation: z.number().int().positive(),
+  observed_at: isoDate,
+  type: z.string().min(1).max(120),
+  source: z.enum(['leverframe', 'codex', 'sandbox', 'github', 'ticket', 'human']),
+  trust: developmentEventTrustSchema,
+  payload: z.record(z.string(), z.unknown()),
+});
+
+export const developmentInterruptSchema = z.object({
+  id: z.number().int().positive(),
+  kind: z.enum(['clarification', 'plan_approval', 'publication_approval']),
+  status: z.enum(['open', 'answered', 'approved', 'rejected', 'cancelled', 'superseded']),
+  prompt: z.string(),
+  candidate_hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
+  publication_kind: z.enum(['push_and_pr', 'push_existing']).nullable(),
+  lock_version: z.number().int().positive(),
+  requested_at: isoDate,
+  resolved_at: isoDate.nullable(),
+});
+
+export const developmentEvidenceSchema = z.object({
+  id: z.number().int().positive(),
+  criterion: z.string(),
+  method: z.enum(['command', 'browser', 'inspection', 'external_observation']),
+  observation: z.string(),
+  trust: developmentEventTrustSchema,
+  verdict: z.enum(['passed', 'failed', 'unresolved']),
+  candidate_hash: z.string().regex(/^[0-9a-f]{64}$/),
+  created_at: isoDate,
+});
+
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 export type DependencyStatus = z.infer<typeof dependencyStatusSchema>;
 export type ReviewListItem = z.infer<typeof reviewListItemSchema>;
@@ -340,3 +440,9 @@ export type ReviewEvaluationWriteRequest = z.infer<typeof reviewEvaluationWriteR
 export type FindingEvaluationWriteRequest = z.infer<typeof findingEvaluationWriteRequestSchema>;
 export type DeleteEvaluationRequest = z.infer<typeof deleteEvaluationRequestSchema>;
 export type ContextResponse = z.infer<typeof contextResponseSchema>;
+export type DevelopmentPhase = z.infer<typeof developmentPhaseSchema>;
+export type DevelopmentRunCreate = z.infer<typeof developmentRunCreateSchema>;
+export type DevelopmentRunSummary = z.infer<typeof developmentRunSummarySchema>;
+export type DevelopmentEvent = z.infer<typeof developmentEventSchema>;
+export type DevelopmentInterrupt = z.infer<typeof developmentInterruptSchema>;
+export type DevelopmentEvidence = z.infer<typeof developmentEvidenceSchema>;

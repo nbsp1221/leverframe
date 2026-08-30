@@ -377,6 +377,217 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE review_jobs_v6 RENAME TO review_jobs;
     `),
   },
+  {
+    version: 7,
+    name: 'leverframe-development-runs',
+    apply: (database) =>
+      database.exec(`
+      CREATE TABLE development_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_key TEXT NOT NULL DEFAULT 'development' CHECK(workflow_key = 'development'),
+        workflow_version TEXT NOT NULL DEFAULT 'development-v1' CHECK(workflow_version = 'development-v1'),
+        repository TEXT NOT NULL CHECK(length(repository) BETWEEN 3 AND 255),
+        accepted_work_revision_id INTEGER REFERENCES development_work_revisions(id),
+        phase TEXT NOT NULL CHECK(phase IN (
+          'INTAKE','PREPARING','PLANNING','AWAITING_PLAN_APPROVAL','IMPLEMENTING','VERIFYING',
+          'AWAITING_PUBLICATION_APPROVAL','PUBLISHING','REVIEWING','AWAITING_MERGE',
+          'WAITING_FOR_INPUT','COMPLETED','FAILED','CANCELLED'
+        )),
+        prior_phase TEXT CHECK(prior_phase IS NULL OR prior_phase IN (
+          'INTAKE','PREPARING','PLANNING','AWAITING_PLAN_APPROVAL','IMPLEMENTING','VERIFYING',
+          'AWAITING_PUBLICATION_APPROVAL','PUBLISHING','REVIEWING','AWAITING_MERGE'
+        )),
+        generation INTEGER NOT NULL DEFAULT 1 CHECK(generation > 0),
+        lock_version INTEGER NOT NULL DEFAULT 1 CHECK(lock_version > 0),
+        candidate_hash TEXT CHECK(candidate_hash IS NULL OR (
+          length(candidate_hash) = 64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'
+        )),
+        last_activity_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX development_runs_phase_activity_idx
+        ON development_runs(phase, last_activity_at DESC, id DESC);
+
+      CREATE TABLE development_work_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL CHECK(revision > 0),
+        source_kind TEXT NOT NULL CHECK(source_kind IN ('WEB','TICKET')),
+        goal TEXT NOT NULL CHECK(length(goal) BETWEEN 1 AND 20000),
+        normalized_json TEXT NOT NULL CHECK(json_valid(normalized_json)),
+        source_provider TEXT,
+        source_external_id TEXT,
+        source_external_key TEXT,
+        source_url TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(run_id, revision),
+        CHECK((source_kind = 'WEB' AND source_provider IS NULL AND source_external_id IS NULL) OR
+              (source_kind = 'TICKET' AND source_provider IS NOT NULL AND source_external_id IS NOT NULL))
+      );
+      CREATE INDEX development_work_revisions_run_idx
+        ON development_work_revisions(run_id, revision DESC);
+
+      CREATE TABLE development_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        work_revision_id INTEGER NOT NULL REFERENCES development_work_revisions(id),
+        phase TEXT NOT NULL CHECK(phase IN ('PREPARING','PLANNING','IMPLEMENTING','VERIFYING','PUBLISHING','REVIEWING')),
+        attempt INTEGER NOT NULL CHECK(attempt > 0),
+        generation INTEGER NOT NULL CHECK(generation > 0),
+        executor_kind TEXT NOT NULL CHECK(executor_kind IN ('CODEX_APP_SERVER','DETERMINISTIC','REVIEWER')),
+        codex_profile TEXT,
+        thread_id TEXT,
+        turn_id TEXT,
+        state TEXT NOT NULL CHECK(state IN ('CLAIMED','RUNNING','WAITING','SUCCEEDED','FAILED','CANCELLED','LOST')),
+        lease_owner TEXT,
+        lease_expires_at TEXT,
+        candidate_hash TEXT CHECK(candidate_hash IS NULL OR (
+          length(candidate_hash) = 64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'
+        )),
+        outcome_code TEXT,
+        outcome_excerpt TEXT CHECK(outcome_excerpt IS NULL OR length(outcome_excerpt) <= 4000),
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(run_id, phase, attempt),
+        UNIQUE(run_id, generation),
+        CHECK((state IN ('CLAIMED','RUNNING','WAITING') AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL) OR
+              (state IN ('SUCCEEDED','FAILED','CANCELLED','LOST')))
+      );
+      CREATE UNIQUE INDEX development_attempts_one_active_run_idx
+        ON development_attempts(run_id) WHERE state IN ('CLAIMED','RUNNING','WAITING');
+      CREATE INDEX development_attempts_lease_idx
+        ON development_attempts(state, lease_expires_at);
+
+      CREATE TABLE development_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL CHECK(sequence > 0),
+        generation INTEGER NOT NULL CHECK(generation > 0),
+        attempt_id INTEGER REFERENCES development_attempts(id) ON DELETE SET NULL,
+        type TEXT NOT NULL CHECK(length(type) BETWEEN 1 AND 120),
+        source TEXT NOT NULL CHECK(source IN ('LEVERFRAME','CODEX','SANDBOX','GITHUB','TICKET','HUMAN')),
+        trust TEXT NOT NULL CHECK(trust IN ('SYSTEM_OBSERVED','HARNESS_OBSERVED','AGENT_CLAIMED','HUMAN_DECIDED')),
+        idempotency_key TEXT,
+        payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND length(payload_json) <= 65536),
+        observed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(run_id, sequence)
+      );
+      CREATE UNIQUE INDEX development_events_idempotency_idx
+        ON development_events(run_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+      CREATE INDEX development_events_run_idx ON development_events(run_id, sequence);
+
+      CREATE TABLE development_interrupts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        work_revision_id INTEGER NOT NULL REFERENCES development_work_revisions(id),
+        attempt_id INTEGER REFERENCES development_attempts(id) ON DELETE SET NULL,
+        generation INTEGER NOT NULL CHECK(generation > 0),
+        kind TEXT NOT NULL CHECK(kind IN ('CLARIFICATION','PLAN_APPROVAL','PUBLICATION_APPROVAL')),
+        status TEXT NOT NULL CHECK(status IN ('OPEN','ANSWERED','APPROVED','REJECTED','CANCELLED','SUPERSEDED')),
+        request_id TEXT,
+        thread_id TEXT,
+        turn_id TEXT,
+        prompt TEXT NOT NULL CHECK(length(prompt) BETWEEN 1 AND 20000),
+        context_json TEXT NOT NULL CHECK(json_valid(context_json) AND length(context_json) <= 65536),
+        candidate_hash TEXT CHECK(candidate_hash IS NULL OR (
+          length(candidate_hash) = 64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'
+        )),
+        publication_kind TEXT CHECK(publication_kind IS NULL OR publication_kind IN ('PUSH_AND_PR','PUSH_EXISTING')),
+        response TEXT CHECK(response IS NULL OR length(response) <= 20000),
+        lock_version INTEGER NOT NULL DEFAULT 1 CHECK(lock_version > 0),
+        requested_at TEXT NOT NULL,
+        resolved_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK((kind = 'PUBLICATION_APPROVAL' AND candidate_hash IS NOT NULL AND publication_kind IS NOT NULL) OR
+              (kind != 'PUBLICATION_APPROVAL' AND publication_kind IS NULL))
+      );
+      CREATE UNIQUE INDEX development_interrupts_one_open_run_idx
+        ON development_interrupts(run_id) WHERE status = 'OPEN';
+      CREATE INDEX development_interrupts_run_idx ON development_interrupts(run_id, id);
+
+      CREATE TABLE development_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        work_revision_id INTEGER NOT NULL REFERENCES development_work_revisions(id),
+        attempt_id INTEGER REFERENCES development_attempts(id) ON DELETE SET NULL,
+        generation INTEGER NOT NULL CHECK(generation > 0),
+        candidate_hash TEXT NOT NULL CHECK(
+          length(candidate_hash) = 64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'
+        ),
+        criterion TEXT NOT NULL CHECK(length(criterion) BETWEEN 1 AND 1000),
+        method TEXT NOT NULL CHECK(method IN ('COMMAND','BROWSER','INSPECTION','EXTERNAL_OBSERVATION')),
+        observation TEXT NOT NULL CHECK(length(observation) BETWEEN 1 AND 10000),
+        command_or_artifact TEXT CHECK(command_or_artifact IS NULL OR length(command_or_artifact) <= 4000),
+        result_code TEXT,
+        trust TEXT NOT NULL CHECK(trust IN ('SYSTEM_OBSERVED','HARNESS_OBSERVED','AGENT_CLAIMED','HUMAN_DECIDED')),
+        excerpt TEXT CHECK(excerpt IS NULL OR length(excerpt) <= 4000),
+        verdict TEXT NOT NULL CHECK(verdict IN ('PASSED','FAILED','UNRESOLVED')),
+        created_at TEXT NOT NULL,
+        CHECK(NOT (trust = 'AGENT_CLAIMED' AND verdict = 'PASSED'))
+      );
+      CREATE INDEX development_evidence_candidate_idx
+        ON development_evidence(run_id, candidate_hash, id);
+
+      CREATE TABLE development_external_refs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL CHECK(length(provider) BETWEEN 1 AND 80),
+        kind TEXT NOT NULL CHECK(kind IN ('TICKET','PULL_REQUEST')),
+        external_id TEXT NOT NULL CHECK(length(external_id) BETWEEN 1 AND 255),
+        external_key TEXT,
+        url TEXT,
+        observation_json TEXT CHECK(observation_json IS NULL OR json_valid(observation_json)),
+        observed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(run_id, provider, kind)
+      );
+      CREATE INDEX development_external_refs_run_idx ON development_external_refs(run_id, id);
+
+      CREATE TABLE development_resources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK(kind IN ('SANDBOX','WORKSPACE','BRANCH','PREVIEW')),
+        provider TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        locator TEXT,
+        state TEXT NOT NULL CHECK(state IN ('PROVISIONING','ACTIVE','STOPPED','RETAINED','CLEANUP_PENDING','CLEANUP_FAILED','CLEANED','UNKNOWN')),
+        generation INTEGER NOT NULL CHECK(generation > 0),
+        last_error TEXT CHECK(last_error IS NULL OR length(last_error) <= 4000),
+        observed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(run_id, kind)
+      );
+      CREATE INDEX development_resources_state_idx ON development_resources(state, updated_at);
+
+      CREATE TABLE development_outbound_intents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES development_runs(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL CHECK(length(provider) BETWEEN 1 AND 80),
+        operation TEXT NOT NULL CHECK(length(operation) BETWEEN 1 AND 120),
+        idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 255),
+        state TEXT NOT NULL CHECK(state IN ('PENDING','PERFORMING','UNKNOWN','CONFIRMED','FAILED','CANCELLED')),
+        candidate_hash TEXT CHECK(candidate_hash IS NULL OR (
+          length(candidate_hash) = 64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'
+        )),
+        request_json TEXT NOT NULL CHECK(json_valid(request_json) AND length(request_json) <= 65536),
+        observation_json TEXT CHECK(observation_json IS NULL OR json_valid(observation_json)),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+        last_error TEXT CHECK(last_error IS NULL OR length(last_error) <= 4000),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(provider, idempotency_key)
+      );
+      CREATE INDEX development_outbound_intents_state_idx
+        ON development_outbound_intents(state, updated_at);
+    `),
+  },
 ];
 
 export function runMigrations(database: DatabaseSync): number {
@@ -477,6 +688,22 @@ export function runMigrations(database: DatabaseSync): number {
     !associationColumns.has('attempts')
   ) {
     throw new Error('incompatible github_thread_association_intents schema');
+  }
+  for (const [table, requiredColumns] of Object.entries({
+    development_runs: ['accepted_work_revision_id', 'phase', 'generation', 'lock_version'],
+    development_work_revisions: ['run_id', 'revision', 'source_kind', 'goal'],
+    development_attempts: ['run_id', 'work_revision_id', 'generation', 'state'],
+    development_events: ['run_id', 'sequence', 'generation', 'trust', 'payload_json'],
+    development_interrupts: ['run_id', 'work_revision_id', 'generation', 'lock_version'],
+    development_evidence: ['run_id', 'candidate_hash', 'trust', 'verdict'],
+    development_external_refs: ['run_id', 'provider', 'kind', 'external_id'],
+    development_resources: ['run_id', 'kind', 'state', 'generation'],
+    development_outbound_intents: ['run_id', 'provider', 'idempotency_key', 'state'],
+  })) {
+    const actual = columns(database, table);
+    if (requiredColumns.some((column) => !actual.has(column))) {
+      throw new Error(`incompatible ${table} schema`);
+    }
   }
   return latest;
 }
