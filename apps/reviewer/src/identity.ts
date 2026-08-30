@@ -21,6 +21,11 @@ export const reviewProtocol = {
   statusMarker: '<!-- leverframe:review-status -->',
 } as const;
 
+export const developmentProtocol = {
+  sandboxNamePrefix: 'leverframe-dev-',
+  branchPrefix: 'codex/',
+} as const;
+
 export function statusCommentMarker(): string {
   return reviewProtocol.statusMarker;
 }
@@ -39,4 +44,15 @@ export function reviewerSandboxName(jobId: number): string {
 
 export function reviewerSandboxPattern(): RegExp {
   return new RegExp(`^${reviewProtocol.sandboxNamePrefix}(\\d+)$`);
+}
+
+export function developmentSandboxName(runId: number): string {
+  if (!Number.isSafeInteger(runId) || runId < 1) {
+    throw new Error('development run ID must be a positive safe integer');
+  }
+  return `${developmentProtocol.sandboxNamePrefix}${runId}`;
+}
+
+export function developmentSandboxPattern(): RegExp {
+  return new RegExp(`^${developmentProtocol.sandboxNamePrefix}(\\d+)$`);
 }

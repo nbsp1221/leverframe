@@ -16,6 +16,8 @@ export function sandboxCreateArguments(input: {
   workspaces: readonly string[];
   cpus?: number;
   memory?: string;
+  denyNetwork?: readonly string[];
+  disableSharedSkills?: boolean;
 }): string[] {
   return [
     'create',
@@ -28,7 +30,8 @@ export function sandboxCreateArguments(input: {
     input.memory ?? '8g',
     '--template',
     input.template,
-    '--no-share-skills',
+    ...(input.denyNetwork ?? []).flatMap((host) => ['--deny-network', host]),
+    ...(input.disableSharedSkills === false ? [] : ['--no-share-skills']),
     'codex',
     ...input.workspaces,
   ];

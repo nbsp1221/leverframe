@@ -38,4 +38,23 @@ describe('sandbox runtime', () => {
     expect(() => assertSupportedSbxVersion('0.39.0')).not.toThrow();
     expect(() => assertSupportedSbxVersion('1.0.0')).not.toThrow();
   });
+
+  it('adds run-scoped network denies before the development agent', () => {
+    const arguments_ = sandboxCreateArguments({
+      name: 'leverframe-dev-59',
+      template: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
+      workspaces: ['/private/workspace', '/private/skills:ro'],
+      denyNetwork: ['github.com', 'api.github.com'],
+    });
+    expect(arguments_.slice(arguments_.indexOf('--deny-network'))).toEqual([
+      '--deny-network',
+      'github.com',
+      '--deny-network',
+      'api.github.com',
+      '--no-share-skills',
+      'codex',
+      '/private/workspace',
+      '/private/skills:ro',
+    ]);
+  });
 });
