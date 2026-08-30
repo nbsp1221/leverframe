@@ -5,6 +5,7 @@ import {
   developmentEvidenceSchema,
   developmentInterruptSchema,
   developmentPlanApprovalSchema,
+  developmentPublicationApprovalSchema,
   developmentRunCreateSchema,
   developmentRunDetailSchema,
   developmentRunIdParamsSchema,
@@ -109,6 +110,27 @@ const streamRoute = createRoute({
     },
     404: jsonResponse(errorResponseSchema, 'The run was not found.'),
     422: jsonResponse(errorResponseSchema, 'The run identifier or sequence is invalid.'),
+  },
+});
+
+const approvePublicationRoute = createRoute({
+  method: 'post',
+  path: '/api/v1/development/runs/{runId}/publication-approval',
+  operationId: 'resolveDevelopmentPublicationApproval',
+  tags: ['Development'],
+  summary: 'Approve or reject publication of the exact verified candidate',
+  request: {
+    params: developmentRunIdParamsSchema,
+    body: {
+      required: true,
+      content: { 'application/json': { schema: developmentPublicationApprovalSchema } },
+    },
+  },
+  responses: {
+    202: jsonResponse(developmentRunSummarySchema, 'The candidate-bound decision was accepted.'),
+    404: jsonResponse(errorResponseSchema, 'The run was not found.'),
+    409: jsonResponse(errorResponseSchema, 'The decision, run, or candidate is stale.'),
+    422: jsonResponse(errorResponseSchema, 'The request is invalid.'),
   },
 });
 
@@ -245,6 +267,36 @@ export function registerDevelopmentRoutes(
         await stream.sleep(1_000);
       }
     });
+  });
+  app.openapi(approvePublicationRoute, (c) => {
+    const runId = c.req.valid('param').runId;
+    if (database.development.getRun(runId) === undefined) {
+      return apiError(c, 404, 'development run not found', 'NOT_FOUND');
+    }
+    if (hooks.onDevelopmentPublicationApproval === undefined) {
+      return apiError(c, 409, 'development runtime is not configured', 'DEVELOPMENT_UNAVAILABLE');
+    }
+    const input = c.req.valid('json');
+    try {
+      hooks.onDevelopmentPublicationApproval({
+        runId,
+        interruptId: input.interrupt_id,
+        interruptLockVersion: input.expected_lock_version,
+        candidateHash: input.candidate_hash,
+        approve: input.approve,
+        ...(input.response === undefined ? {} : { response: input.response }),
+      });
+      return json(
+        c,
+        developmentRunSummarySchema.parse(summary(database.development.requireRun(runId))),
+        202,
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        return apiError(c, 409, error.message, 'STALE_DEVELOPMENT_STATE');
+      }
+      throw error;
+    }
   });
 }
 

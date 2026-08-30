@@ -72,6 +72,7 @@ const serverConfigSchema = z.object({
     .object({
       repository: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
       commitSkillDirectory: z.string().min(1),
+      createPrSkillDirectory: z.string().min(1),
       verificationCommand: z.string().trim().min(1).max(2000),
     })
     .optional(),
@@ -139,6 +140,8 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
             repository: developmentRepository,
             commitSkillDirectory:
               environment.DEVELOPMENT_COMMIT_SKILL_DIRECTORY ?? '/agent-skills/commit',
+            createPrSkillDirectory:
+              environment.DEVELOPMENT_CREATE_PR_SKILL_DIRECTORY ?? '/agent-skills/create-pr',
             verificationCommand: environment.DEVELOPMENT_VERIFICATION_COMMAND ?? 'pnpm check',
           },
         }),

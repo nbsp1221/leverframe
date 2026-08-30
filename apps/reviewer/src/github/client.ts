@@ -48,6 +48,13 @@ export interface RepositoryDetails {
   repositoryId: number;
 }
 
+export interface DevelopmentPullRequest {
+  headSha: string;
+  number: number;
+  state: 'open';
+  url: string;
+}
+
 export type CheckConclusion = 'cancelled' | 'failure' | 'neutral' | 'success' | 'timed_out';
 
 export interface CheckOutput {
@@ -105,6 +112,36 @@ export class GitHubAppClient {
     throw new Error(
       `configured repository ${input.repository} is not accessible to the GitHub App`,
     );
+  }
+
+  async findOpenPullRequest(input: {
+    installationId: number;
+    repository: string;
+    branch: string;
+  }): Promise<DevelopmentPullRequest | undefined> {
+    const [owner, repository] = splitRepository(input.repository);
+    const octokit = await this.#app.getInstallationOctokit(input.installationId);
+    const response = await this.#withRetry(() =>
+      octokit.request('GET /repos/{owner}/{repo}/pulls', {
+        owner,
+        repo: repository,
+        state: 'open',
+        head: `${owner}:${input.branch}`,
+        per_page: 2,
+      }),
+    );
+    if (response.data.length > 1) {
+      throw new Error(`multiple open pull requests exist for ${input.repository}:${input.branch}`);
+    }
+    const pullRequest = response.data[0];
+    return pullRequest === undefined
+      ? undefined
+      : {
+          headSha: pullRequest.head.sha,
+          number: Number(pullRequest.number),
+          state: 'open',
+          url: pullRequest.html_url,
+        };
   }
 
   async getPullRequest(input: {

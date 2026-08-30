@@ -114,9 +114,10 @@ describe('agent-readable API documentation', () => {
         'getDevelopmentRun',
         'resolveDevelopmentPlanApproval',
         'streamDevelopmentRun',
+        'resolveDevelopmentPublicationApproval',
       ]),
     );
-    expect(operationIds).toHaveLength(16);
+    expect(operationIds).toHaveLength(17);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
@@ -180,6 +181,12 @@ describe('agent-readable API documentation', () => {
         '/api/v1/development/runs/{runId}/events',
         'streamDevelopmentRun',
         ['200', '404', '422'],
+      ],
+      [
+        'post',
+        '/api/v1/development/runs/{runId}/publication-approval',
+        'resolveDevelopmentPublicationApproval',
+        ['202', '404', '409', '422'],
       ],
     ] as const;
     expect(Object.keys(document.paths).sort()).toEqual(

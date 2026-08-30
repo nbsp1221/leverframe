@@ -39,6 +39,14 @@ export interface ServerHooks {
     approve: boolean;
     response?: string;
   }) => void;
+  onDevelopmentPublicationApproval?: (input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    candidateHash: string;
+    approve: boolean;
+    response?: string;
+  }) => void;
   /** Optional bounded context adapter. It must never return credentials or an entire diff. */
   getFindingContext?: (input: {
     repository: string;

@@ -117,6 +117,7 @@ describe('server configuration', () => {
     ).toEqual({
       repository: 'nbsp1221/leverframe',
       commitSkillDirectory: '/agent-skills/commit',
+      createPrSkillDirectory: '/agent-skills/create-pr',
       verificationCommand: 'pnpm check',
     });
   });

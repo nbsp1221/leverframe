@@ -20,6 +20,7 @@ export class DevelopmentSandboxManager {
       dataDirectory: string;
       sandboxTemplate: string;
       commitSkillDirectory: string;
+      createPrSkillDirectory: string;
     },
   ) {
     mkdirSync(options.dataDirectory, { recursive: true, mode: 0o700 });
@@ -39,7 +40,7 @@ export class DevelopmentSandboxManager {
     assertCommitSha(input.baseSha);
     assertCredentialFreeRemote(input.cloneUrl);
     const paths = this.paths(input.runId, true);
-    this.snapshotCommitSkill(paths.skillsDirectory);
+    this.snapshotSkill(paths.skillsDirectory, 'commit', this.options.commitSkillDirectory);
     const name = developmentSandboxName(input.runId);
     await runProcess(
       'sbx',
@@ -169,6 +170,78 @@ export class DevelopmentSandboxManager {
     );
   }
 
+  async enablePublication(runId: number): Promise<void> {
+    const name = developmentSandboxName(runId);
+    const paths = this.paths(runId, false);
+    this.snapshotSkill(paths.skillsDirectory, 'create-pr', this.options.createPrSkillDirectory);
+    await runProcess('sbx', [
+      'policy',
+      'rm',
+      'network',
+      '--sandbox',
+      name,
+      '--resource',
+      'github.com,api.github.com',
+    ]);
+    try {
+      await runProcess('sbx', [
+        'secret',
+        'set',
+        'github',
+        '--sandbox',
+        name,
+        '--command',
+        'gh auth token',
+      ]);
+      await runProcess('sbx', [
+        'policy',
+        'allow',
+        'network',
+        '--sandbox',
+        name,
+        'github.com,api.github.com',
+      ]);
+      const checked = await runProcess('sbx', [
+        'policy',
+        'check',
+        'network',
+        '--sandbox',
+        name,
+        'https://api.github.com',
+        '--json',
+      ]);
+      const result: unknown = JSON.parse(checked.stdout);
+      if (
+        result === null ||
+        typeof result !== 'object' ||
+        !('allowed' in result) ||
+        result.allowed !== true
+      ) {
+        throw new Error('development Sandbox GitHub publication access was not enabled');
+      }
+    } catch (error) {
+      await this.disablePublication(runId).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async disablePublication(runId: number): Promise<void> {
+    const name = developmentSandboxName(runId);
+    await runProcess('sbx', ['secret', 'rm', 'github', '--sandbox', name, '--force']).catch(
+      () => undefined,
+    );
+    await runProcess('sbx', [
+      'policy',
+      'rm',
+      'network',
+      '--sandbox',
+      name,
+      '--resource',
+      'github.com,api.github.com',
+    ]).catch(() => undefined);
+    await this.denyGitHub(name);
+  }
+
   async cleanup(input: {
     runId: number;
     expectedBranch: string;
@@ -216,18 +289,18 @@ export class DevelopmentSandboxManager {
     return realpathSync(directory);
   }
 
-  private snapshotCommitSkill(skillsDirectory: string): void {
-    const source = realpathSync(this.options.commitSkillDirectory);
-    if (!existsSync(join(source, 'SKILL.md')) || basename(source) !== 'commit') {
-      throw new Error('configured commit skill directory is invalid');
+  private snapshotSkill(skillsDirectory: string, name: string, sourceDirectory: string): void {
+    const source = realpathSync(sourceDirectory);
+    if (!existsSync(join(source, 'SKILL.md')) || basename(source) !== name) {
+      throw new Error(`configured ${name} skill directory is invalid`);
     }
-    const destination = resolveInside(skillsDirectory, 'commit');
+    const destination = resolveInside(skillsDirectory, name);
     if (!existsSync(destination)) {
       cpSync(source, destination, { recursive: true, errorOnExist: true, force: false });
     }
     const snapshot = readFileSync(join(destination, 'SKILL.md'), 'utf8');
     if (snapshot.trim().length === 0) {
-      throw new Error('commit skill snapshot is empty');
+      throw new Error(`${name} skill snapshot is empty`);
     }
   }
 

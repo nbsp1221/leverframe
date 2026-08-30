@@ -106,6 +106,7 @@ function serve(): void {
             dataDirectory: dataRoot,
             sandboxTemplate: config.sandboxTemplate,
             commitSkillDirectory: config.development.commitSkillDirectory,
+            createPrSkillDirectory: config.development.createPrSkillDirectory,
           }),
           verificationCommand: config.development.verificationCommand,
           workerId: `leverframe-${process.pid}`,
@@ -131,6 +132,11 @@ function serve(): void {
               input: Parameters<DevelopmentController['approvePlan']>[0],
             ) => {
               void developmentController.approvePlan(input);
+            },
+            onDevelopmentPublicationApproval: (
+              input: Parameters<DevelopmentController['approvePublication']>[0],
+            ) => {
+              void developmentController.approvePublication(input);
             },
           }),
     },

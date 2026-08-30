@@ -15,6 +15,12 @@ function setup(input: { prepareFailure?: Error } = {}) {
     goal: 'Plan the smallest useful feature.',
     repository: 'example/leverframe',
   });
+  const findOpenPullRequest = vi.fn().mockResolvedValue({
+    number: 12,
+    state: 'open',
+    url: 'https://github.com/example/leverframe/pull/12',
+    headSha: 'b'.repeat(40),
+  });
   const github = {
     getRepository: vi.fn().mockResolvedValue({
       cloneUrl: 'https://github.com/example/leverframe.git',
@@ -24,8 +30,11 @@ function setup(input: { prepareFailure?: Error } = {}) {
       repositoryId: 2,
     }),
     createRepositoryReadToken: vi.fn().mockResolvedValue('read-token'),
+    findOpenPullRequest,
   } as unknown as GitHubAppClient;
   const stop = vi.fn().mockResolvedValue(undefined);
+  const enablePublication = vi.fn().mockResolvedValue(undefined);
+  const disablePublication = vi.fn().mockResolvedValue(undefined);
   const candidateHash = 'c'.repeat(64);
   const sandbox = {
     prepare:
@@ -48,6 +57,8 @@ function setup(input: { prepareFailure?: Error } = {}) {
       dirty: false,
     }),
     runVerification: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+    enablePublication,
+    disablePublication,
   } as unknown as DevelopmentSandboxManager;
   let onNotification: ((notification: AppServerNotification) => void) | undefined;
   const close = vi.fn();
@@ -63,11 +74,10 @@ function setup(input: { prepareFailure?: Error } = {}) {
   });
   const appServer = {
     setSkillRoots: vi.fn().mockResolvedValue(undefined),
-    listSkills: vi
-      .fn()
-      .mockResolvedValue([
-        { enabled: true, name: 'commit', path: '/private/skills/commit/SKILL.md' },
-      ]),
+    listSkills: vi.fn().mockResolvedValue([
+      { enabled: true, name: 'commit', path: '/private/skills/commit/SKILL.md' },
+      { enabled: true, name: 'create-pr', path: '/private/skills/create-pr/SKILL.md' },
+    ]),
     startThread: vi.fn().mockResolvedValue('01990ef4-4c57-7000-8000-000000000001'),
     resumeThread: vi.fn().mockResolvedValue(undefined),
     startTurn,
@@ -89,7 +99,18 @@ function setup(input: { prepareFailure?: Error } = {}) {
     verificationCommand: 'pnpm check',
     workerId: 'test-worker',
   });
-  return { close, controller, database, repository, run, sandbox, stop };
+  return {
+    close,
+    controller,
+    database,
+    disablePublication,
+    enablePublication,
+    findOpenPullRequest,
+    repository,
+    run,
+    sandbox,
+    stop,
+  };
 }
 
 describe('DevelopmentController planning', () => {
@@ -148,6 +169,48 @@ describe('DevelopmentController planning', () => {
       publicationKind: 'PUSH_AND_PR',
     });
     expect(context.repository.findActiveAttempt(run.id)).toBeUndefined();
+    context.database.close();
+  });
+
+  it('publishes only the approved candidate and observes the pull request before review', async () => {
+    const context = setup();
+    await context.controller.startPlanning(context.run.id);
+    const plan = context.repository.getOpenInterrupt(context.run.id);
+    if (plan === undefined) {
+      throw new Error('plan approval was not created');
+    }
+    await context.controller.approvePlan({
+      runId: context.run.id,
+      interruptId: plan.id,
+      interruptLockVersion: plan.lockVersion,
+      approve: true,
+    });
+    const publication = context.repository.getOpenInterrupt(context.run.id);
+    if (publication?.candidateHash === undefined) {
+      throw new Error('publication approval was not created');
+    }
+
+    await context.controller.approvePublication({
+      runId: context.run.id,
+      interruptId: publication.id,
+      interruptLockVersion: publication.lockVersion,
+      candidateHash: publication.candidateHash,
+      approve: true,
+    });
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe('REVIEWING');
+    expect(context.enablePublication).toHaveBeenCalledWith(context.run.id);
+    expect(context.disablePublication).toHaveBeenCalledWith(context.run.id);
+    expect(context.findOpenPullRequest).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'example/leverframe',
+      branch: 'codex/development-1',
+    });
+    expect(
+      context.repository
+        .listEvents(context.run.id)
+        .some((event) => event.type === 'pull_request_observed'),
+    ).toBe(true);
     context.database.close();
   });
 });

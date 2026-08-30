@@ -1,5 +1,11 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { transaction } from './connection.js';
+import {
+  type DevelopmentAttemptRow,
+  type DevelopmentRunRow,
+  mapDevelopmentAttempt,
+  mapDevelopmentRun,
+} from './development-mappers.js';
 
 export type DevelopmentPhase =
   | 'INTAKE'
@@ -153,7 +159,7 @@ export class DevelopmentRepository {
         WHERE r.id = ?
       `)
       .get(id) as DevelopmentRunRow | undefined;
-    return row === undefined ? undefined : mapRun(row);
+    return row === undefined ? undefined : mapDevelopmentRun(row);
   }
 
   listRuns(): DevelopmentRun[] {
@@ -166,7 +172,7 @@ export class DevelopmentRepository {
           ORDER BY r.last_activity_at DESC, r.id DESC
         `)
         .all() as unknown as DevelopmentRunRow[]
-    ).map(mapRun);
+    ).map(mapDevelopmentRun);
   }
 
   requireRun(id: number): DevelopmentRun {
@@ -324,7 +330,7 @@ export class DevelopmentRepository {
     if (row === undefined) {
       throw new Error(`development attempt ${id} not found`);
     }
-    return mapAttempt(row);
+    return mapDevelopmentAttempt(row);
   }
 
   findActiveAttempt(runId: number): DevelopmentAttempt | undefined {
@@ -333,7 +339,7 @@ export class DevelopmentRepository {
         "SELECT * FROM development_attempts WHERE run_id = ? AND state IN ('CLAIMED','RUNNING','WAITING') ORDER BY id DESC LIMIT 1",
       )
       .get(runId) as DevelopmentAttemptRow | undefined;
-    return row === undefined ? undefined : mapAttempt(row);
+    return row === undefined ? undefined : mapDevelopmentAttempt(row);
   }
 
   findLatestThreadId(runId: number): string | undefined {
@@ -753,6 +759,104 @@ export class DevelopmentRepository {
     }
   }
 
+  decidePublicationApproval(input: {
+    runId: number;
+    interruptId: number;
+    expectedInterruptLockVersion: number;
+    expectedGeneration: number;
+    expectedRunLockVersion: number;
+    candidateHash: string;
+    approve: boolean;
+    response?: string;
+    now?: string;
+  }): DevelopmentRun {
+    const now = input.now ?? new Date().toISOString();
+    return transaction(this.database, () => {
+      const resolved = this.database
+        .prepare(`
+          UPDATE development_interrupts SET
+            status = ?, response = ?, resolved_at = ?, updated_at = ?, lock_version = lock_version + 1
+          WHERE id = ? AND run_id = ? AND kind = 'PUBLICATION_APPROVAL' AND status = 'OPEN'
+            AND lock_version = ? AND generation = ? AND candidate_hash = ?
+        `)
+        .run(
+          input.approve ? 'APPROVED' : 'REJECTED',
+          input.response ?? null,
+          now,
+          now,
+          input.interruptId,
+          input.runId,
+          input.expectedInterruptLockVersion,
+          input.expectedGeneration,
+          input.candidateHash,
+        );
+      if (resolved.changes !== 1) {
+        throw new DevelopmentConflictError(`publication approval ${input.interruptId} changed`);
+      }
+      return this.transitionWithinTransaction({
+        id: input.runId,
+        expectedGeneration: input.expectedGeneration,
+        expectedLockVersion: input.expectedRunLockVersion,
+        phase: input.approve ? 'PUBLISHING' : 'IMPLEMENTING',
+        advanceGeneration: true,
+        event: {
+          type: input.approve ? 'publication_approved' : 'publication_rejected',
+          source: 'HUMAN',
+          trust: 'HUMAN_DECIDED',
+          payload: { candidate_hash: input.candidateHash },
+          observedAt: now,
+        },
+      });
+    });
+  }
+
+  recordPullRequest(input: {
+    runId: number;
+    generation: number;
+    number: number;
+    url: string;
+    headSha: string;
+    now?: string;
+  }): void {
+    const now = input.now ?? new Date().toISOString();
+    transaction(this.database, () => {
+      const run = this.requireRun(input.runId);
+      if (run.generation !== input.generation || run.phase !== 'PUBLISHING') {
+        throw new DevelopmentConflictError(
+          `pull request observation for run ${input.runId} is stale`,
+        );
+      }
+      this.database
+        .prepare(`
+          INSERT INTO development_external_refs (
+            run_id, provider, kind, external_id, external_key, url, observation_json,
+            observed_at, created_at, updated_at
+          ) VALUES (?, 'github', 'PULL_REQUEST', ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(run_id, provider, kind) DO UPDATE SET
+            external_id = excluded.external_id, external_key = excluded.external_key,
+            url = excluded.url, observation_json = excluded.observation_json,
+            observed_at = excluded.observed_at, updated_at = excluded.updated_at
+        `)
+        .run(
+          input.runId,
+          String(input.number),
+          `#${input.number}`,
+          input.url,
+          JSON.stringify({ head_sha: input.headSha, state: 'open' }),
+          now,
+          now,
+          now,
+        );
+      this.insertEvent(input.runId, input.generation, {
+        type: 'pull_request_observed',
+        source: 'GITHUB',
+        trust: 'SYSTEM_OBSERVED',
+        payload: { number: input.number, url: input.url, head_sha: input.headSha },
+        observedAt: now,
+      });
+    });
+  }
+
   private transitionWithinTransaction(input: {
     id: number;
     expectedGeneration: number;
@@ -905,68 +1009,4 @@ export class DevelopmentRepository {
       );
     return Number(result.lastInsertRowid);
   }
-}
-
-interface DevelopmentRunRow {
-  id: number;
-  repository: string;
-  phase: DevelopmentPhase;
-  prior_phase: DevelopmentPhase | null;
-  generation: number;
-  lock_version: number;
-  accepted_work_revision_id: number;
-  revision: number;
-  goal: string;
-  candidate_hash: string | null;
-  last_activity_at: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface DevelopmentAttemptRow {
-  id: number;
-  run_id: number;
-  work_revision_id: number;
-  phase: DevelopmentPhase;
-  attempt: number;
-  generation: number;
-  state: DevelopmentAttempt['state'];
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  thread_id: string | null;
-  turn_id: string | null;
-}
-
-function mapRun(row: DevelopmentRunRow): DevelopmentRun {
-  return {
-    id: Number(row.id),
-    repository: row.repository,
-    phase: row.phase,
-    ...(row.prior_phase === null ? {} : { priorPhase: row.prior_phase }),
-    generation: Number(row.generation),
-    lockVersion: Number(row.lock_version),
-    workRevisionId: Number(row.accepted_work_revision_id),
-    revision: Number(row.revision),
-    goal: row.goal,
-    ...(row.candidate_hash === null ? {} : { candidateHash: row.candidate_hash }),
-    lastActivityAt: row.last_activity_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function mapAttempt(row: DevelopmentAttemptRow): DevelopmentAttempt {
-  return {
-    id: Number(row.id),
-    runId: Number(row.run_id),
-    workRevisionId: Number(row.work_revision_id),
-    phase: row.phase,
-    attempt: Number(row.attempt),
-    generation: Number(row.generation),
-    state: row.state,
-    ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
-    ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at }),
-    ...(row.thread_id === null ? {} : { threadId: row.thread_id }),
-    ...(row.turn_id === null ? {} : { turnId: row.turn_id }),
-  };
 }

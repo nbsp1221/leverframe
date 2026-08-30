@@ -433,6 +433,14 @@ export const developmentPlanApprovalSchema = z.object({
   response: z.string().trim().max(20_000).optional(),
 });
 
+export const developmentPublicationApprovalSchema = z.object({
+  interrupt_id: z.number().int().positive(),
+  expected_lock_version: z.number().int().positive(),
+  candidate_hash: z.string().regex(/^[0-9a-f]{64}$/),
+  approve: z.boolean(),
+  response: z.string().trim().max(20_000).optional(),
+});
+
 export const developmentRunDetailSchema = z.object({
   run: developmentRunSummarySchema,
   events: z.array(developmentEventSchema),
@@ -465,4 +473,5 @@ export type DevelopmentEvent = z.infer<typeof developmentEventSchema>;
 export type DevelopmentInterrupt = z.infer<typeof developmentInterruptSchema>;
 export type DevelopmentEvidence = z.infer<typeof developmentEvidenceSchema>;
 export type DevelopmentPlanApproval = z.infer<typeof developmentPlanApprovalSchema>;
+export type DevelopmentPublicationApproval = z.infer<typeof developmentPublicationApprovalSchema>;
 export type DevelopmentRunDetail = z.infer<typeof developmentRunDetailSchema>;

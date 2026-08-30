@@ -89,6 +89,32 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
     router.refresh();
   }
 
+  async function approvePublication() {
+    const interrupt = detail.interrupt;
+    if (interrupt?.kind !== 'publication_approval' || interrupt.candidate_hash === null) {
+      return;
+    }
+    setPending(true);
+    setError(undefined);
+    const response = await fetch(`/api/v1/development/runs/${detail.run.id}/publication-approval`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        interrupt_id: interrupt.id,
+        expected_lock_version: interrupt.lock_version,
+        candidate_hash: interrupt.candidate_hash,
+        approve: true,
+      }),
+    });
+    if (!response.ok) {
+      setError(t('approvalFailed'));
+      setPending(false);
+      router.refresh();
+      return;
+    }
+    router.refresh();
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -187,6 +213,28 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
                     </Button>
                   </FieldGroup>
                 </form>
+              </CardContent>
+            </Card>
+          ) : null}
+          {detail.interrupt?.kind === 'publication_approval' ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('approvePublication')}</CardTitle>
+                <CardDescription>{t('approvePublicationDescription')}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <code className="break-all rounded-md bg-muted p-3 text-xs">
+                  {detail.interrupt.candidate_hash}
+                </code>
+                {error ? (
+                  <Alert variant="destructive">
+                    <AlertTitle>{error}</AlertTitle>
+                  </Alert>
+                ) : null}
+                <Button onClick={() => void approvePublication()} disabled={pending}>
+                  {pending ? <Spinner data-icon="inline-start" /> : null}
+                  {t('publishCandidate')}
+                </Button>
               </CardContent>
             </Card>
           ) : null}

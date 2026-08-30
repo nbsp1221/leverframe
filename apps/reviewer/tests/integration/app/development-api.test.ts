@@ -54,6 +54,7 @@ async function fixture(input: { configured?: boolean; hooks?: ServerHooks } = {}
             development: {
               repository: 'owner/repo',
               commitSkillDirectory: '/agent-skills/commit',
+              createPrSkillDirectory: '/agent-skills/create-pr',
               verificationCommand: 'pnpm check',
             },
           }

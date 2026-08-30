@@ -19,12 +19,16 @@ function manager() {
   const root = mkdtempSync(join(tmpdir(), 'leverframe-development-manager-'));
   roots.push(root);
   const commitSkillDirectory = join(root, 'source-skills', 'commit');
+  const createPrSkillDirectory = join(root, 'source-skills', 'create-pr');
   mkdirSync(commitSkillDirectory, { recursive: true });
+  mkdirSync(createPrSkillDirectory, { recursive: true });
   writeFileSync(join(commitSkillDirectory, 'SKILL.md'), '# Commit\n', { mode: 0o600 });
+  writeFileSync(join(createPrSkillDirectory, 'SKILL.md'), '# Create PR\n', { mode: 0o600 });
   return new DevelopmentSandboxManager({
     dataDirectory: join(root, 'data'),
     sandboxTemplate: template,
     commitSkillDirectory,
+    createPrSkillDirectory,
   });
 }
 
@@ -36,6 +40,43 @@ afterEach(() => {
 });
 
 describe('DevelopmentSandboxManager', () => {
+  it('grants and revokes a run-scoped GitHub publication capability', async () => {
+    const sandboxManager = manager();
+    sandboxManager.paths(1, true);
+    vi.mocked(runProcess).mockImplementation((command, arguments_) =>
+      Promise.resolve({
+        stdout:
+          command === 'sbx' && arguments_.includes('check')
+            ? '{"allowed":true}'
+            : command === 'sh'
+              ? '{"allowed":false}'
+              : '',
+        stderr: '',
+      }),
+    );
+
+    await sandboxManager.enablePublication(1);
+    await sandboxManager.disablePublication(1);
+
+    expect(runProcess).toHaveBeenCalledWith('sbx', [
+      'secret',
+      'set',
+      'github',
+      '--sandbox',
+      'leverframe-dev-1',
+      '--command',
+      'gh auth token',
+    ]);
+    expect(runProcess).toHaveBeenCalledWith('sbx', [
+      'secret',
+      'rm',
+      'github',
+      '--sandbox',
+      'leverframe-dev-1',
+      '--force',
+    ]);
+  });
+
   it('creates a private workspace with a read-only-mounted skill snapshot and credential-free arguments', async () => {
     const sandboxManager = manager();
     vi.mocked(runProcess)

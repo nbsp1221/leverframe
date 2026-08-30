@@ -100,6 +100,47 @@ export class DevelopmentController {
     return completion;
   }
 
+  approvePublication(input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    candidateHash: string;
+    approve: boolean;
+    response?: string;
+  }): Promise<void> {
+    if (this.#active.has(input.runId)) {
+      throw new DevelopmentControllerConflictError(`development run ${input.runId} is active`);
+    }
+    const run = this.options.database.requireRun(input.runId);
+    if (
+      run.phase !== 'AWAITING_PUBLICATION_APPROVAL' ||
+      run.candidateHash !== input.candidateHash
+    ) {
+      throw new DevelopmentControllerConflictError(
+        `development run ${input.runId} is not awaiting this publication candidate`,
+      );
+    }
+    const publishing = this.options.database.decidePublicationApproval({
+      runId: run.id,
+      interruptId: input.interruptId,
+      expectedInterruptLockVersion: input.interruptLockVersion,
+      expectedGeneration: run.generation,
+      expectedRunLockVersion: run.lockVersion,
+      candidateHash: input.candidateHash,
+      approve: input.approve,
+      ...(input.response === undefined ? {} : { response: input.response }),
+    });
+    if (!input.approve) {
+      return Promise.resolve();
+    }
+    const abort = new AbortController();
+    const completion = this.publish(publishing.id, input.candidateHash, abort.signal)
+      .catch((error: unknown) => this.fail(publishing.id, error))
+      .finally(() => this.#active.delete(publishing.id));
+    this.#active.set(publishing.id, { abort, completion });
+    return completion;
+  }
+
   private async plan(runId: number, signal: AbortSignal): Promise<void> {
     let run = this.options.database.requireRun(runId);
     const repository = await this.options.github.getRepository({
@@ -293,6 +334,9 @@ export class DevelopmentController {
     }
 
     const candidate = await this.options.sandbox.candidateIdentity(runId);
+    if (candidate.dirty) {
+      throw new Error('implementation candidate must be committed before verification');
+    }
     run = this.options.database.setCandidate({
       id: run.id,
       expectedGeneration: run.generation,
@@ -399,6 +443,112 @@ export class DevelopmentController {
         'Publish this exact verified candidate by pushing its branch and creating a pull request?',
     });
     await this.options.sandbox.stop(run.id).catch(() => undefined);
+  }
+
+  private async publish(
+    runId: number,
+    approvedCandidateHash: string,
+    _signal: AbortSignal,
+  ): Promise<void> {
+    let run = this.options.database.requireRun(runId);
+    const attempt = this.options.database.claimAttempt({
+      runId,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'PUBLISHING',
+      executorKind: 'CODEX_APP_SERVER',
+      leaseOwner: this.options.workerId,
+      leaseExpiresAt: new Date(Date.now() + leaseMilliseconds).toISOString(),
+    });
+    const paths = this.options.sandbox.paths(runId, false);
+    const threadId = this.options.database.findLatestThreadId(runId);
+    if (threadId === undefined) {
+      throw new Error('development run has no resumable Codex thread');
+    }
+    const repository = await this.options.github.getRepository({
+      allowedOwnerId: this.options.allowedOwnerId,
+      repository: run.repository,
+    });
+    const branch = `codex/development-${run.id}`;
+    const completed = deferred<void>();
+    let server: CodexAppServer | undefined;
+    try {
+      await this.options.sandbox.enablePublication(runId);
+      const launch = this.options.launchAppServer ?? ((input) => CodexAppServer.launch(input));
+      server = await launch({
+        sandboxName: developmentSandboxName(runId),
+        workspaceDirectory: paths.workspaceDirectory,
+        onNotification: (notification) => {
+          this.recordNotification(runId, run.generation, attempt.id, notification);
+          if (notification.method === 'turn/completed') {
+            completed.resolve();
+          }
+        },
+        onRequest: (request) =>
+          Promise.reject(new Error(`publication request ${request.method} is not authorized`)),
+      });
+      await server.setSkillRoots([paths.skillsDirectory]);
+      const createPrSkill = (await server.listSkills(paths.workspaceDirectory)).find(
+        (skill) => skill.name === 'create-pr' && skill.enabled,
+      );
+      if (createPrSkill === undefined) {
+        throw new Error('run-specific create-pr skill is unavailable');
+      }
+      await server.resumeThread({ threadId, cwd: paths.workspaceDirectory });
+      const turnId = await server.startTurn({
+        threadId,
+        prompt: `The operator approved one publication of candidate ${approvedCandidateHash}. Use the supplied create-pr skill to push branch ${branch} and create its pull request. Do not modify source, create another branch, merge, deploy, or perform any other external write.`,
+        skills: [{ name: createPrSkill.name, path: createPrSkill.path }],
+      });
+      this.options.database.attachAttemptRuntime({
+        id: attempt.id,
+        generation: run.generation,
+        leaseOwner: this.options.workerId,
+        threadId,
+        turnId,
+      });
+      await withTimeout(completed.promise, turnTimeoutMilliseconds, 'publication turn timed out');
+      const candidate = await this.options.sandbox.candidateIdentity(runId);
+      if (candidate.hash !== approvedCandidateHash || candidate.dirty) {
+        throw new Error('publication turn changed the approved candidate');
+      }
+      const pullRequest = await this.options.github.findOpenPullRequest({
+        installationId: repository.installationId,
+        repository: run.repository,
+        branch,
+      });
+      if (pullRequest === undefined || pullRequest.headSha !== candidate.headSha) {
+        throw new Error('approved pull request publication was not observed on GitHub');
+      }
+      this.options.database.recordPullRequest({
+        runId,
+        generation: run.generation,
+        number: pullRequest.number,
+        url: pullRequest.url,
+        headSha: pullRequest.headSha,
+      });
+      this.options.database.completeAttempt({
+        id: attempt.id,
+        runId,
+        generation: run.generation,
+        leaseOwner: this.options.workerId,
+        state: 'SUCCEEDED',
+        outcomeCode: 'PULL_REQUEST_OBSERVED',
+      });
+      run = this.options.database.requireRun(runId);
+      this.options.database.transition({
+        id: run.id,
+        expectedGeneration: run.generation,
+        expectedLockVersion: run.lockVersion,
+        phase: 'REVIEWING',
+        advanceGeneration: true,
+        event: observed('review_wait_started', { pull_request: pullRequest.number }),
+      });
+    } finally {
+      server?.close();
+      await this.options.sandbox.disablePublication(runId).catch(() => undefined);
+      await this.options.sandbox.stop(runId).catch(() => undefined);
+    }
   }
 
   private claim(
