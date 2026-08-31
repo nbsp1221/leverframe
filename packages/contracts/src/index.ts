@@ -326,6 +326,234 @@ export const errorResponseSchema = z.object({
   details: z.unknown().optional(),
 });
 
+export const developmentPhaseSchema = z.enum([
+  'intake',
+  'preparing',
+  'planning',
+  'awaiting_plan_approval',
+  'implementing',
+  'verifying',
+  'awaiting_publication_approval',
+  'publishing',
+  'reviewing',
+  'awaiting_merge',
+  'waiting_for_input',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+export const developmentRunIdParamsSchema = z.object({
+  runId: z.coerce.number().int().positive(),
+});
+
+export const developmentRepositorySchema = z.object({
+  repository: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
+  default_branch: z.string().min(1),
+  private: z.boolean(),
+});
+
+export const developmentRepositoryListSchema = z.object({
+  items: z.array(developmentRepositorySchema),
+});
+
+export const developmentRepositoryQuerySchema = z.object({
+  q: z.string().trim().max(200).default(''),
+  page: z.coerce.number().int().positive().default(1),
+  per_page: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const developmentTicketSchema = z.object({
+  id: z.string().uuid(),
+  key: z.string().min(1),
+  title: z.string().min(1),
+  status: z.string().min(1),
+  priority: z.string().nullable(),
+  project_id: z.string().uuid().nullable(),
+});
+
+export const developmentTicketListSchema = z.object({ items: z.array(developmentTicketSchema) });
+
+export const developmentTicketImportSchema = developmentTicketSchema.extend({
+  goal: z.string().min(1),
+  repository_suggestions: z.array(z.object({ repository: z.string(), accessible: z.boolean() })),
+  external_source: z.object({
+    provider: z.literal('multica'),
+    id: z.string().uuid(),
+    key: z.string().min(1),
+    url: z.url().nullable(),
+  }),
+});
+
+export const developmentRunCreateSchema = z.object({
+  goal: z.string().trim().min(1).max(20_000),
+  repository: z
+    .string()
+    .trim()
+    .regex(/^[^/\s]+\/[^/\s]+$/),
+  external_source: z
+    .object({
+      provider: z.string().trim().min(1).max(80),
+      id: z.string().trim().min(1).max(255),
+      key: z.string().trim().min(1).max(255).nullable(),
+      url: z.url().nullable(),
+    })
+    .optional(),
+});
+
+export const developmentRunSummarySchema = z.object({
+  id: z.number().int().positive(),
+  workflow: z.literal('development-v1'),
+  repository: z.string(),
+  phase: developmentPhaseSchema,
+  prior_phase: developmentPhaseSchema.nullable(),
+  generation: z.number().int().positive(),
+  revision: z.number().int().positive(),
+  goal: z.string(),
+  candidate_hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
+  operator_action: z.enum(['answer', 'approve_plan', 'approve_publication']).nullable(),
+  last_activity_at: isoDate,
+  created_at: isoDate,
+  updated_at: isoDate,
+});
+
+export const developmentEventTrustSchema = z.enum([
+  'system_observed',
+  'harness_observed',
+  'agent_claimed',
+  'human_decided',
+]);
+
+export const developmentEventSchema = z.object({
+  schema_version: z.literal(1),
+  sequence: z.number().int().positive(),
+  generation: z.number().int().positive(),
+  observed_at: isoDate,
+  type: z.string().min(1).max(120),
+  source: z.enum(['leverframe', 'codex', 'sandbox', 'github', 'ticket', 'human']),
+  trust: developmentEventTrustSchema,
+  payload: z.record(z.string(), z.unknown()),
+});
+
+export const developmentInterruptSchema = z.object({
+  id: z.number().int().positive(),
+  kind: z.enum(['clarification', 'plan_approval', 'publication_approval']),
+  status: z.enum(['open', 'answered', 'approved', 'rejected', 'cancelled', 'superseded']),
+  prompt: z.string(),
+  questions: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(120),
+        header: z.string().min(1).max(120),
+        question: z.string().min(1).max(2000),
+        is_other: z.boolean(),
+        options: z
+          .array(
+            z.object({
+              label: z.string().min(1).max(200),
+              description: z.string().max(1000),
+            }),
+          )
+          .nullable(),
+      }),
+    )
+    .max(3)
+    .nullable(),
+  candidate_hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
+  publication_kind: z.enum(['push_and_pr', 'push_existing']).nullable(),
+  lock_version: z.number().int().positive(),
+  requested_at: isoDate,
+  resolved_at: isoDate.nullable(),
+});
+
+export const developmentClarificationAnswerSchema = z.object({
+  interrupt_id: z.number().int().positive(),
+  expected_lock_version: z.number().int().positive(),
+  answers: z
+    .record(z.string().min(1).max(120), z.array(z.string().trim().min(1).max(4000)).min(1).max(5))
+    .refine((answers) => JSON.stringify(answers).length <= 20_000, 'answers are too large'),
+});
+
+export const developmentEvidenceSchema = z.object({
+  id: z.number().int().positive(),
+  criterion: z.string(),
+  method: z.enum(['command', 'browser', 'inspection', 'external_observation']),
+  observation: z.string(),
+  trust: developmentEventTrustSchema,
+  verdict: z.enum(['passed', 'failed', 'unresolved']),
+  candidate_hash: z.string().regex(/^[0-9a-f]{64}$/),
+  created_at: isoDate,
+});
+
+export const developmentResourceSchema = z.object({
+  kind: z.enum(['sandbox', 'workspace', 'branch', 'preview']),
+  provider: z.string().min(1),
+  external_id: z.string().min(1),
+  state: z.enum([
+    'provisioning',
+    'active',
+    'stopped',
+    'retained',
+    'cleanup_pending',
+    'cleanup_failed',
+    'cleaned',
+    'unknown',
+  ]),
+  generation: z.number().int().positive(),
+  last_error: z.string().nullable(),
+  observed_at: isoDate,
+  updated_at: isoDate,
+});
+
+export const developmentPlanApprovalSchema = z.object({
+  interrupt_id: z.number().int().positive(),
+  expected_lock_version: z.number().int().positive(),
+  approve: z.boolean(),
+  response: z.string().trim().max(20_000).optional(),
+});
+
+export const developmentPublicationApprovalSchema = z.object({
+  interrupt_id: z.number().int().positive(),
+  expected_lock_version: z.number().int().positive(),
+  candidate_hash: z.string().regex(/^[0-9a-f]{64}$/),
+  approve: z.boolean(),
+  response: z.string().trim().max(20_000).optional(),
+});
+
+export const developmentRunDetailSchema = z.object({
+  run: developmentRunSummarySchema,
+  events: z.array(developmentEventSchema),
+  interrupt: developmentInterruptSchema.nullable(),
+  evidence: z.array(developmentEvidenceSchema),
+  resources: z.array(developmentResourceSchema),
+  external_source: z
+    .object({
+      provider: z.string().min(1),
+      id: z.string().min(1),
+      key: z.string().nullable(),
+      url: z.url().nullable(),
+    })
+    .nullable(),
+  external_sync: z
+    .object({
+      status: z.string().min(1),
+      state: z.enum(['pending', 'performing', 'unknown', 'confirmed', 'failed', 'cancelled']),
+      last_error: z.string().nullable(),
+      updated_at: isoDate,
+    })
+    .nullable(),
+});
+
+export const developmentRunListSchema = z.object({
+  items: z.array(developmentRunSummarySchema),
+});
+
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 export type DependencyStatus = z.infer<typeof dependencyStatusSchema>;
 export type ReviewListItem = z.infer<typeof reviewListItemSchema>;
@@ -340,3 +568,18 @@ export type ReviewEvaluationWriteRequest = z.infer<typeof reviewEvaluationWriteR
 export type FindingEvaluationWriteRequest = z.infer<typeof findingEvaluationWriteRequestSchema>;
 export type DeleteEvaluationRequest = z.infer<typeof deleteEvaluationRequestSchema>;
 export type ContextResponse = z.infer<typeof contextResponseSchema>;
+export type DevelopmentPhase = z.infer<typeof developmentPhaseSchema>;
+export type DevelopmentRepository = z.infer<typeof developmentRepositorySchema>;
+export type DevelopmentTicket = z.infer<typeof developmentTicketSchema>;
+export type DevelopmentTicketImport = z.infer<typeof developmentTicketImportSchema>;
+export type DevelopmentRunCreate = z.infer<typeof developmentRunCreateSchema>;
+export type DevelopmentRunSummary = z.infer<typeof developmentRunSummarySchema>;
+export type DevelopmentEvent = z.infer<typeof developmentEventSchema>;
+export type DevelopmentInterrupt = z.infer<typeof developmentInterruptSchema>;
+
+export type DevelopmentClarificationAnswer = z.infer<typeof developmentClarificationAnswerSchema>;
+
+export type DevelopmentEvidence = z.infer<typeof developmentEvidenceSchema>;
+export type DevelopmentPlanApproval = z.infer<typeof developmentPlanApprovalSchema>;
+export type DevelopmentPublicationApproval = z.infer<typeof developmentPublicationApprovalSchema>;
+export type DevelopmentRunDetail = z.infer<typeof developmentRunDetailSchema>;

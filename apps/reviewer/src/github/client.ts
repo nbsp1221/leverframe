@@ -16,6 +16,8 @@ import type { GitHubAppCredentials } from './credentials.js';
 import { withGitHubRetry } from './retry.js';
 
 const maximumGitHubBodyCharacters = 60_000;
+const githubPageSize = 100;
+const maximumGitHubPages = 100;
 
 export interface PullRequestDetails {
   baseRef: string;
@@ -40,6 +42,29 @@ export interface ReviewPublicationResult {
   reviewId: number;
 }
 
+export interface RepositoryDetails {
+  cloneUrl: string;
+  defaultBranch: string;
+  defaultBranchSha: string;
+  installationId: number;
+  repositoryId: number;
+}
+
+export interface AppRepositorySummary {
+  defaultBranch: string;
+  private: boolean;
+  repository: string;
+}
+
+export interface DevelopmentPullRequest {
+  headSha: string;
+  number: number;
+  state: 'open';
+  url: string;
+}
+
+export class GitHubRepositoryUnavailableError extends Error {}
+
 export type CheckConclusion = 'cancelled' | 'failure' | 'neutral' | 'success' | 'timed_out';
 
 export interface CheckOutput {
@@ -55,6 +80,184 @@ export class GitHubAppClient {
       appId: credentials.appId,
       privateKey: credentials.privateKey,
     });
+  }
+
+  async getRepository(input: {
+    allowedOwnerId: number;
+    repository: string;
+  }): Promise<RepositoryDetails> {
+    const [owner, repository] = splitRepository(input.repository);
+    const installation = await this.#withRetry(() =>
+      this.#app.octokit.request('GET /repos/{owner}/{repo}/installation', {
+        owner,
+        repo: repository,
+      }),
+    ).catch((error: unknown) => {
+      if (githubErrorStatus(error) === 404) {
+        throw new GitHubRepositoryUnavailableError(
+          `repository ${input.repository} is not accessible to the GitHub App`,
+        );
+      }
+      throw error;
+    });
+    if (
+      installation.data.account?.id !== input.allowedOwnerId ||
+      installation.data.suspended_at !== null
+    ) {
+      throw new GitHubRepositoryUnavailableError(
+        `repository ${input.repository} is not accessible to the GitHub App`,
+      );
+    }
+    const octokit = await this.#app.getInstallationOctokit(installation.data.id);
+    const response = await this.#withRetry(() =>
+      octokit.request('GET /repos/{owner}/{repo}', { owner, repo: repository }),
+    );
+    if (
+      response.data.owner.id !== input.allowedOwnerId ||
+      response.data.full_name !== input.repository
+    ) {
+      throw new GitHubRepositoryUnavailableError(
+        `repository ${input.repository} identity changed during validation`,
+      );
+    }
+    const branch = await this.#withRetry(() =>
+      octokit.request('GET /repos/{owner}/{repo}/branches/{branch}', {
+        owner,
+        repo: repository,
+        branch: response.data.default_branch,
+      }),
+    );
+    return {
+      cloneUrl: response.data.clone_url,
+      defaultBranch: response.data.default_branch,
+      defaultBranchSha: branch.data.commit.sha,
+      installationId: Number(installation.data.id),
+      repositoryId: Number(response.data.id),
+    };
+  }
+
+  async resolveRepository(input: {
+    allowedOwnerId: number;
+    repository: string;
+  }): Promise<RepositoryDetails | undefined> {
+    try {
+      return await this.getRepository(input);
+    } catch (error) {
+      if (error instanceof GitHubRepositoryUnavailableError) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
+  async isRepositoryAccessible(input: {
+    allowedOwnerId: number;
+    repository: string;
+  }): Promise<boolean> {
+    const [owner, repository] = splitRepository(input.repository);
+    try {
+      const installation = await this.#withRetry(() =>
+        this.#app.octokit.request('GET /repos/{owner}/{repo}/installation', {
+          owner,
+          repo: repository,
+        }),
+      );
+      return (
+        installation.data.account?.id === input.allowedOwnerId &&
+        installation.data.suspended_at === null
+      );
+    } catch (error) {
+      if (githubErrorStatus(error) === 404) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async listRepositories(allowedOwnerId: number): Promise<readonly AppRepositorySummary[]> {
+    const installations = await this.#allPages(async (page) => {
+      const response = await this.#withRetry(() =>
+        this.#app.octokit.request('GET /app/installations', {
+          page,
+          per_page: githubPageSize,
+        }),
+      );
+      return response.data;
+    });
+    const repositories = new Map<number, AppRepositorySummary>();
+    for (const installation of installations) {
+      if (installation.account?.id !== allowedOwnerId || installation.suspended_at !== null) {
+        continue;
+      }
+      const octokit = await this.#app.getInstallationOctokit(installation.id);
+      const accessible = await this.#allPages(async (page) => {
+        const response = await this.#withRetry(() =>
+          octokit.request('GET /installation/repositories', {
+            page,
+            per_page: githubPageSize,
+          }),
+        );
+        return response.data.repositories;
+      });
+      for (const repository of accessible) {
+        const id = Number(repository.id);
+        const summary = {
+          defaultBranch: repository.default_branch,
+          private: repository.private,
+          repository: repository.full_name,
+        };
+        const existing = repositories.get(id);
+        if (existing !== undefined && existing.repository !== summary.repository) {
+          throw new Error(`GitHub repository ${id} has conflicting identities`);
+        }
+        repositories.set(id, summary);
+      }
+    }
+    return [...repositories.values()].sort((left, right) =>
+      left.repository.localeCompare(right.repository),
+    );
+  }
+
+  async #allPages<T>(readPage: (page: number) => Promise<readonly T[]>): Promise<T[]> {
+    const values: T[] = [];
+    for (let page = 1; page <= maximumGitHubPages; page += 1) {
+      const current = await readPage(page);
+      values.push(...current);
+      if (current.length < githubPageSize) {
+        return values;
+      }
+    }
+    throw new Error(`GitHub pagination exceeded ${maximumGitHubPages} pages`);
+  }
+
+  async findOpenPullRequest(input: {
+    installationId: number;
+    repository: string;
+    branch: string;
+  }): Promise<DevelopmentPullRequest | undefined> {
+    const [owner, repository] = splitRepository(input.repository);
+    const octokit = await this.#app.getInstallationOctokit(input.installationId);
+    const response = await this.#withRetry(() =>
+      octokit.request('GET /repos/{owner}/{repo}/pulls', {
+        owner,
+        repo: repository,
+        state: 'open',
+        head: `${owner}:${input.branch}`,
+        per_page: 2,
+      }),
+    );
+    if (response.data.length > 1) {
+      throw new Error(`multiple open pull requests exist for ${input.repository}:${input.branch}`);
+    }
+    const pullRequest = response.data[0];
+    return pullRequest === undefined
+      ? undefined
+      : {
+          headSha: pullRequest.head.sha,
+          number: Number(pullRequest.number),
+          state: 'open',
+          url: pullRequest.html_url,
+        };
   }
 
   async getPullRequest(input: {

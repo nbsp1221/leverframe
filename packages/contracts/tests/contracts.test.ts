@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   deleteEvaluationRequestSchema,
+  developmentRunCreateSchema,
+  developmentRunSummarySchema,
   findingEvaluationWriteRequestSchema,
   findingParamsSchema,
   reviewEvaluationWriteRequestSchema,
@@ -112,5 +114,44 @@ describe('review API request contracts', () => {
       expected_previous_id: 7,
     });
     expect(deleteEvaluationRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts web-native development work without an external ticket', () => {
+    expect(
+      developmentRunCreateSchema.parse({
+        goal: 'Build a small development graph.',
+        repository: 'example/leverframe',
+      }),
+    ).toEqual({ goal: 'Build a small development graph.', repository: 'example/leverframe' });
+    expect(
+      developmentRunCreateSchema.safeParse({
+        goal: 'Import a ticket.',
+        repository: 'example/leverframe',
+        external_source: { provider: 'multica', id: 'ticket-59', key: 'PER-59', url: null },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('keeps authoritative development phase separate from derived operator action', () => {
+    const summary = {
+      id: 1,
+      workflow: 'development-v1',
+      repository: 'example/leverframe',
+      phase: 'awaiting_plan_approval',
+      prior_phase: null,
+      generation: 2,
+      revision: 1,
+      goal: 'Build the feature.',
+      candidate_hash: null,
+      operator_action: 'approve_plan',
+      last_activity_at: '2026-08-30T00:00:00.000Z',
+      created_at: '2026-08-30T00:00:00.000Z',
+      updated_at: '2026-08-30T00:00:00.000Z',
+    };
+    expect(developmentRunSummarySchema.parse(summary)).toEqual(summary);
+    expect(
+      developmentRunSummarySchema.safeParse({ ...summary, operator_action: 'run_arbitrary_tool' })
+        .success,
+    ).toBe(false);
   });
 });

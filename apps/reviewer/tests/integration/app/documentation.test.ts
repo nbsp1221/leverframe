@@ -42,6 +42,11 @@ async function fixture(): Promise<string> {
       reasoningEffort: 'low',
       resourcesDirectory: join(directory, 'resources'),
       sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
+      development: {
+        commitSkillDirectory: '/agent-skills/commit',
+        createPrSkillDirectory: '/agent-skills/create-pr',
+        verificationCommand: 'pnpm check',
+      },
     },
     database,
     credentials,
@@ -109,9 +114,21 @@ describe('agent-readable API documentation', () => {
         'getFindingContext',
         'getReviewExecution',
         'streamReviewExecution',
+        'listDevelopmentRepositories',
+        'listDevelopmentTickets',
+        'importDevelopmentTicket',
+        'listDevelopmentRuns',
+        'createDevelopmentRun',
+        'getDevelopmentRun',
+        'answerDevelopmentClarification',
+        'resolveDevelopmentPlanApproval',
+        'streamDevelopmentRun',
+        'resolveDevelopmentPublicationApproval',
+        'cancelDevelopmentRun',
+        'cleanupDevelopmentRun',
       ]),
     );
-    expect(operationIds).toHaveLength(11);
+    expect(operationIds).toHaveLength(23);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
@@ -160,6 +177,58 @@ describe('agent-readable API documentation', () => {
         '/api/v1/reviews/{reviewId}/execution/events',
         'streamReviewExecution',
         ['200', '404', '422'],
+      ],
+      [
+        'get',
+        '/api/v1/development/repositories',
+        'listDevelopmentRepositories',
+        ['200', '422', '503'],
+      ],
+      ['get', '/api/v1/development/tickets', 'listDevelopmentTickets', ['200', '503']],
+      [
+        'get',
+        '/api/v1/development/tickets/{ticketId}/import',
+        'importDevelopmentTicket',
+        ['200', '422', '503'],
+      ],
+      ['get', '/api/v1/development/runs', 'listDevelopmentRuns', ['200']],
+      ['post', '/api/v1/development/runs', 'createDevelopmentRun', ['201', '409', '422', '503']],
+      ['get', '/api/v1/development/runs/{runId}', 'getDevelopmentRun', ['200', '404', '422']],
+      [
+        'post',
+        '/api/v1/development/runs/{runId}/clarification-answer',
+        'answerDevelopmentClarification',
+        ['202', '404', '409', '422'],
+      ],
+      [
+        'post',
+        '/api/v1/development/runs/{runId}/plan-approval',
+        'resolveDevelopmentPlanApproval',
+        ['202', '404', '409', '422'],
+      ],
+      [
+        'get',
+        '/api/v1/development/runs/{runId}/events',
+        'streamDevelopmentRun',
+        ['200', '404', '422'],
+      ],
+      [
+        'post',
+        '/api/v1/development/runs/{runId}/publication-approval',
+        'resolveDevelopmentPublicationApproval',
+        ['202', '404', '409', '422'],
+      ],
+      [
+        'post',
+        '/api/v1/development/runs/{runId}/cancel',
+        'cancelDevelopmentRun',
+        ['202', '404', '409', '422'],
+      ],
+      [
+        'post',
+        '/api/v1/development/runs/{runId}/cleanup',
+        'cleanupDevelopmentRun',
+        ['202', '404', '409', '422'],
       ],
     ] as const;
     expect(Object.keys(document.paths).sort()).toEqual(

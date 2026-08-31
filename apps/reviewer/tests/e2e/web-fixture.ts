@@ -78,6 +78,11 @@ const server = createLeverframeServer(
     reasoningEffort: 'low',
     resourcesDirectory: fileURLToPath(new URL('../../resources', import.meta.url)),
     sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
+    development: {
+      commitSkillDirectory: '/agent-skills/commit',
+      createPrSkillDirectory: '/agent-skills/create-pr',
+      verificationCommand: 'pnpm check',
+    },
   },
   database,
   credentials,

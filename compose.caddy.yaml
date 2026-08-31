@@ -1,0 +1,15 @@
+services:
+  reviewer:
+    networks:
+      - default
+      - caddy
+
+  web:
+    networks:
+      - default
+      - caddy
+
+networks:
+  caddy:
+    name: caddy-network
+    external: true

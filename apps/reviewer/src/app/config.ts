@@ -68,6 +68,12 @@ const serverConfigSchema = z.object({
   reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
   resourcesDirectory: z.string().min(1),
   sandboxTemplate: sandboxTemplateSchema,
+  development: z.object({
+    commitSkillDirectory: z.string().min(1),
+    createPrSkillDirectory: z.string().min(1),
+    verificationCommand: z.string().trim().min(1).max(2000),
+  }),
+  multicaCliPath: z.string().min(1).nullable().optional(),
 });
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
@@ -124,5 +130,13 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     reasoningEffort: environment.REVIEW_REASONING_EFFORT ?? 'high',
     resourcesDirectory,
     sandboxTemplate: environment.REVIEW_SANDBOX_TEMPLATE,
+    development: {
+      commitSkillDirectory:
+        environment.DEVELOPMENT_COMMIT_SKILL_DIRECTORY ?? '/agent-skills/commit',
+      createPrSkillDirectory:
+        environment.DEVELOPMENT_CREATE_PR_SKILL_DIRECTORY ?? '/agent-skills/create-pr',
+      verificationCommand: environment.DEVELOPMENT_VERIFICATION_COMMAND ?? 'pnpm check',
+    },
+    multicaCliPath: environment.MULTICA_CLI_PATH?.trim() || null,
   });
 }

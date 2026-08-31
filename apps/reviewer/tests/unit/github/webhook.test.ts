@@ -11,6 +11,7 @@ function pullRequestBody(
     after?: string;
     before?: string;
     draft?: boolean;
+    merged?: boolean;
     ownerId?: number;
     title?: string;
   } = {},
@@ -24,6 +25,7 @@ function pullRequestBody(
       pull_request: {
         draft: overrides.draft ?? false,
         head: { sha: 'a'.repeat(40) },
+        ...(overrides.merged === undefined ? {} : { merged: overrides.merged }),
         number: 7,
         title: overrides.title ?? 'Preserve this pull request title',
       },
@@ -131,4 +133,14 @@ describe('GitHub webhook intake', () => {
       });
     },
   );
+
+  it('preserves an observed merge on a closed pull request', () => {
+    expect(
+      decideWebhook({
+        body: pullRequestBody({ action: 'closed', merged: true }),
+        deliveryId: 'delivery-merged',
+        event: 'pull_request',
+      }),
+    ).toMatchObject({ cancellation: { action: 'closed', merged: true }, kind: 'cancel' });
+  });
 });

@@ -29,7 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@repo/ui/components/tooltip';
-import { MoonIcon, SunIcon } from 'lucide-react';
+import { BotIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
@@ -114,6 +114,15 @@ function AppSidebar() {
                   <span>{t('codeReviewBot')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={pathname.includes('/development')}
+                  render={<Link href="/development" />}
+                >
+                  <BotIcon aria-hidden="true" />
+                  <span>{t('development')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -152,6 +161,7 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
   }
 
   const isDark = mounted && resolvedTheme === 'dark';
+  const isDevelopment = pathname.includes('/development');
 
   return (
     <div className="flex min-h-svh min-w-0 flex-1 flex-col bg-background">
@@ -159,15 +169,23 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
         <SidebarTrigger aria-label={t('openMenu')} />
         <Breadcrumb aria-label={t('breadcrumb')} className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap overflow-hidden">
-            <BreadcrumbItem>
-              <BreadcrumbLink render={<Link href="/reviews" />}>
-                {t('codeReviewBot')}
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{t('reviews')}</BreadcrumbPage>
-            </BreadcrumbItem>
+            {isDevelopment ? (
+              <BreadcrumbItem>
+                <BreadcrumbPage>{t('development')}</BreadcrumbPage>
+              </BreadcrumbItem>
+            ) : (
+              <>
+                <BreadcrumbItem>
+                  <BreadcrumbLink render={<Link href="/reviews" />}>
+                    {t('codeReviewBot')}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{t('reviews')}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </>
+            )}
           </BreadcrumbList>
         </Breadcrumb>
         <div className="flex shrink-0 items-center gap-2">
