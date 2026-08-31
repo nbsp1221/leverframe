@@ -137,9 +137,33 @@ describe('DevelopmentSandboxManager', () => {
       }),
     ).rejects.toThrow(/credential-free/);
     await expect(
-      sandboxManager.cleanup({ runId: 1, expectedBranch: 'codex/safe', integrated: false }),
+      sandboxManager.cleanup({
+        runId: 1,
+        expectedBranch: 'codex/safe',
+        expectedHeadSha: baseSha,
+        integrated: false,
+      }),
     ).rejects.toThrow(/integrated/);
     expect(runProcess).not.toHaveBeenCalled();
+  });
+
+  it('refuses cleanup when retained workspace head differs from the merged PR head', async () => {
+    const sandboxManager = manager();
+    sandboxManager.paths(1, true);
+    vi.mocked(runProcess).mockResolvedValue({
+      stdout: `# branch.oid ${'d'.repeat(40)}\n# branch.head codex/safe\n`,
+      stderr: '',
+    });
+
+    await expect(
+      sandboxManager.cleanup({
+        runId: 1,
+        expectedBranch: 'codex/safe',
+        expectedHeadSha: baseSha,
+        integrated: true,
+      }),
+    ).rejects.toThrow(/divergent/);
+    expect(runProcess).toHaveBeenCalledOnce();
   });
 
   it('parses branch identity separately from dirty state', () => {

@@ -128,11 +128,16 @@ export class DevelopmentResourceLifecycle {
     if (resources.every((resource) => resource.state === 'CLEANED')) {
       return;
     }
+    const pullRequest = this.options.database.getPullRequestReference(runId);
+    if (pullRequest === undefined) {
+      throw new Error(`development run ${runId} cleanup requires an observed pull request`);
+    }
     this.observeCleanupState(runId, run.generation, 'CLEANUP_PENDING');
     try {
       await this.options.sandbox.cleanup({
         runId,
         expectedBranch: branchName(runId),
+        expectedHeadSha: pullRequest.headSha,
         integrated: true,
       });
       this.observeCleanupState(runId, run.generation, 'CLEANED');

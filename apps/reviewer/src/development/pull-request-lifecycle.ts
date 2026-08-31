@@ -46,12 +46,10 @@ export async function observeDevelopmentPullRequestClosed(options: {
     payload: { head_sha: input.headSha, pull_request: input.pullRequestNumber },
   };
   if (input.merged === true) {
-    options.database.transition({
+    options.database.completeRun({
       id: current.id,
       expectedGeneration: current.generation,
       expectedLockVersion: current.lockVersion,
-      phase: 'COMPLETED',
-      advanceGeneration: true,
       event,
     });
   } else {

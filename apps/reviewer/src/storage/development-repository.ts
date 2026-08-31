@@ -56,6 +56,13 @@ export interface DevelopmentEventInput {
   observedAt?: string;
 }
 
+interface TerminalRunInput {
+  id: number;
+  expectedGeneration: number;
+  expectedLockVersion: number;
+  event: DevelopmentEventInput;
+}
+
 export interface DevelopmentAttempt {
   id: number;
   runId: number;
@@ -148,12 +155,15 @@ export class DevelopmentRepository {
     return transaction(this.database, () => this.transitionWithinTransaction(input));
   }
 
-  cancelRun(input: {
-    id: number;
-    expectedGeneration: number;
-    expectedLockVersion: number;
-    event: DevelopmentEventInput;
-  }): DevelopmentRun {
+  cancelRun(input: TerminalRunInput): DevelopmentRun {
+    return this.terminateRun(input, 'CANCELLED');
+  }
+
+  completeRun(input: TerminalRunInput): DevelopmentRun {
+    return this.terminateRun(input, 'COMPLETED');
+  }
+
+  private terminateRun(input: TerminalRunInput, phase: 'CANCELLED' | 'COMPLETED'): DevelopmentRun {
     return transaction(this.database, () => {
       const now = input.event.observedAt ?? new Date().toISOString();
       this.database
@@ -167,7 +177,7 @@ export class DevelopmentRepository {
         id: input.id,
         expectedGeneration: input.expectedGeneration,
         expectedLockVersion: input.expectedLockVersion,
-        phase: 'CANCELLED',
+        phase,
         advanceGeneration: true,
         event: { ...input.event, observedAt: now },
       });

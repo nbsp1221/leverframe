@@ -245,15 +245,20 @@ export class DevelopmentSandboxManager {
   async cleanup(input: {
     runId: number;
     expectedBranch: string;
+    expectedHeadSha: string;
     integrated: boolean;
   }): Promise<void> {
     if (!input.integrated) {
       throw new Error('development workspace cleanup requires an observed integrated result');
     }
     const observed = await this.observe(input.runId);
-    if (observed.branch !== input.expectedBranch || observed.dirty) {
+    if (
+      observed.branch !== input.expectedBranch ||
+      observed.headSha !== input.expectedHeadSha ||
+      observed.dirty
+    ) {
       throw new Error(
-        'development workspace cleanup refused because Git state is dirty or unknown',
+        'development workspace cleanup refused because the integrated Git state is dirty or divergent',
       );
     }
     const name = developmentSandboxName(input.runId);

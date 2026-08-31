@@ -677,6 +677,7 @@ describe('DevelopmentController planning', () => {
     expect(context.cleanup).toHaveBeenCalledWith({
       runId: context.run.id,
       expectedBranch: `codex/development-${context.run.id}`,
+      expectedHeadSha: 'b'.repeat(40),
       integrated: true,
     });
     expect(context.controller.options.resources.list(context.run.id)).toEqual(
@@ -777,6 +778,7 @@ describe('DevelopmentController planning', () => {
       });
 
       expect(context.repository.requireRun(context.run.id).phase).toBe(phase);
+      expect(context.repository.getOpenInterrupt(context.run.id)).toBeUndefined();
       expect(context.stop).toHaveBeenCalledWith(context.run.id);
       context.database.close();
     },
