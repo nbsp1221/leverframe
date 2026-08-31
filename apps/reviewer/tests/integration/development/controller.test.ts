@@ -737,4 +737,48 @@ describe('DevelopmentController planning', () => {
     );
     closed.database.close();
   });
+
+  it.each([
+    { merged: false, phase: 'CANCELLED' as const },
+    { merged: true, phase: 'COMPLETED' as const },
+  ])(
+    'handles exact PR closure while a review fix awaits republication',
+    async ({ merged, phase }) => {
+      const context = setup();
+      await publishCandidate(context);
+      await context.controller.observeReviewCompleted({
+        accepted: false,
+        findings: [
+          {
+            evidence: 'The published candidate needs a bounded fix.',
+            file: 'src/example.ts',
+            fingerprint: 'fedcba0987654321',
+            line: 8,
+            title: 'Fix the published candidate',
+          },
+        ],
+        headSha: 'b'.repeat(40),
+        jobId: 11,
+        pullRequestNumber: 12,
+        repository: 'example/leverframe',
+      });
+      expect(context.repository.requireRun(context.run.id).phase).toBe(
+        'AWAITING_PUBLICATION_APPROVAL',
+      );
+
+      await context.controller.observePullRequestClosed({
+        action: 'closed',
+        deliveryId: merged ? 'merged-during-republish' : 'closed-during-republish',
+        headSha: 'b'.repeat(40),
+        installationId: 1,
+        merged,
+        pullRequestNumber: 12,
+        repository: 'example/leverframe',
+      });
+
+      expect(context.repository.requireRun(context.run.id).phase).toBe(phase);
+      expect(context.stop).toHaveBeenCalledWith(context.run.id);
+      context.database.close();
+    },
+  );
 });

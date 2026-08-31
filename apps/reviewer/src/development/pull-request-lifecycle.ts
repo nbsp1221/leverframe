@@ -2,7 +2,15 @@ import type { PullRequestCancellationInput } from '../jobs/database.js';
 import type { DevelopmentRepository } from '../storage/development-repository.js';
 import type { DevelopmentResourceLifecycle } from './resource-lifecycle.js';
 
-const postPublicationPhases = new Set(['PUBLISHING', 'REVIEWING', 'AWAITING_MERGE']);
+const postPublicationPhases = new Set([
+  'IMPLEMENTING',
+  'VERIFYING',
+  'AWAITING_PUBLICATION_APPROVAL',
+  'PUBLISHING',
+  'REVIEWING',
+  'AWAITING_MERGE',
+  'WAITING_FOR_INPUT',
+]);
 
 export async function observeDevelopmentPullRequestClosed(options: {
   input: PullRequestCancellationInput;
