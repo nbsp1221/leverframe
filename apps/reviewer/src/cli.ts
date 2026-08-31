@@ -150,9 +150,11 @@ function serve(): void {
       onManualCommand: (command) => commandHandler.handle(command),
       onPullRequestCancelled: (cancellation) => {
         worker.cancelPullRequest(cancellation);
-        if (cancellation.merged === true) {
-          developmentController.observePullRequestMerged(cancellation);
-        }
+        void developmentController
+          .observePullRequestClosed(cancellation)
+          .catch((error: unknown) =>
+            console.error('development PR lifecycle update failed', error),
+          );
       },
       getFindingContext: (input) => github.getFindingContext(input),
       listDevelopmentRepositories: async () =>

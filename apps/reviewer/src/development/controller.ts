@@ -1,5 +1,6 @@
 import type { AppServerNotification, AppServerRequest } from '../codex/app-server.js';
 import type { GitHubAppClient } from '../github/client.js';
+import type { PullRequestCancellationInput } from '../jobs/database.js';
 import type { DevelopmentSandboxManager } from '../sandbox/development.js';
 import type {
   DevelopmentAttempt,
@@ -9,18 +10,22 @@ import type { DevelopmentResourceRepository } from '../storage/development-resou
 import { CodexAppServer } from '../codex/app-server.js';
 import { developmentSandboxName } from '../identity.js';
 import {
+  approvedImplementationPrompt,
   clarificationRequestSchema,
   deferred,
   developmentInstructions,
   executionPhases,
-  implementationPrompt,
   normalizedNotification,
   observed,
+  planRevisionPrompt,
   planningPrompt,
+  publicationRevisionPrompt,
   reviewFixPrompt,
   sanitize,
+  verificationFixPrompt,
   withTimeout,
 } from './controller-support.js';
+import { observeDevelopmentPullRequestClosed } from './pull-request-lifecycle.js';
 import { DevelopmentResourceLifecycle } from './resource-lifecycle.js';
 
 const leaseMilliseconds = 10 * 60 * 1000;
@@ -156,7 +161,7 @@ export class DevelopmentController {
       ...(input.response === undefined ? {} : { response: input.response }),
     });
     if (!input.approve) {
-      this.options.database.transition({
+      const planning = this.options.database.transition({
         id: run.id,
         expectedGeneration: run.generation,
         expectedLockVersion: run.lockVersion,
@@ -164,7 +169,16 @@ export class DevelopmentController {
         advanceGeneration: true,
         event: observed('plan_rejected', { response: sanitize(input.response ?? '', 4000) }),
       });
-      return Promise.resolve();
+      const abort = new AbortController();
+      const completion = this.revisePlan(
+        planning.id,
+        abort.signal,
+        planRevisionPrompt(input.response),
+      )
+        .catch((error: unknown) => this.fail(planning.id, error))
+        .finally(() => this.#active.delete(planning.id));
+      this.#active.set(planning.id, { abort, completion });
+      return completion;
     }
     const implementing = this.options.database.transition({
       id: run.id,
@@ -175,7 +189,11 @@ export class DevelopmentController {
       event: observed('plan_approved'),
     });
     const abort = new AbortController();
-    const completion = this.implement(implementing.id, abort.signal, implementationPrompt)
+    const completion = this.implement(
+      implementing.id,
+      abort.signal,
+      approvedImplementationPrompt(input.response),
+    )
       .catch((error: unknown) => this.fail(implementing.id, error))
       .finally(() => this.#active.delete(implementing.id));
     this.#active.set(implementing.id, { abort, completion });
@@ -224,7 +242,16 @@ export class DevelopmentController {
       ...(input.response === undefined ? {} : { response: input.response }),
     });
     if (!input.approve) {
-      return Promise.resolve();
+      const abort = new AbortController();
+      const completion = this.implement(
+        publishing.id,
+        abort.signal,
+        publicationRevisionPrompt(input.response),
+      )
+        .catch((error: unknown) => this.fail(publishing.id, error))
+        .finally(() => this.#active.delete(publishing.id));
+      this.#active.set(publishing.id, { abort, completion });
+      return completion;
     }
     const abort = new AbortController();
     const completion = this.publish(
@@ -324,29 +351,15 @@ export class DevelopmentController {
     return completion;
   }
 
-  observePullRequestMerged(input: {
-    headSha: string;
-    pullRequestNumber: number;
-    repository: string;
-  }): void {
-    const run = this.options.database.findRunByPullRequest(input);
-    if (run === undefined || run.phase !== 'AWAITING_MERGE') {
-      return;
-    }
-    const pullRequest = this.options.database.getPullRequestReference(run.id);
-    if (pullRequest?.headSha !== input.headSha) {
-      return;
-    }
-    this.options.database.transition({
-      id: run.id,
-      expectedGeneration: run.generation,
-      expectedLockVersion: run.lockVersion,
-      phase: 'COMPLETED',
-      advanceGeneration: true,
-      event: observed('pull_request_merged', {
-        head_sha: input.headSha,
-        pull_request: input.pullRequestNumber,
-      }),
+  async observePullRequestClosed(input: PullRequestCancellationInput): Promise<void> {
+    await observeDevelopmentPullRequestClosed({
+      input,
+      database: this.options.database,
+      resources: this.#resourceLifecycle,
+      stopActive: (runId) => {
+        this.#active.get(runId)?.abort.abort();
+        this.#clarifications.get(runId)?.reject(new Error('development pull request closed'));
+      },
     });
   }
 
@@ -470,6 +483,69 @@ export class DevelopmentController {
     }
   }
 
+  private async revisePlan(runId: number, signal: AbortSignal, prompt: string): Promise<void> {
+    const run = this.options.database.requireRun(runId);
+    const attempt = this.claim(run, 'PLANNING', 'CODEX_APP_SERVER');
+    const paths = this.options.sandbox.paths(runId, false);
+    const threadId = this.options.database.findLatestThreadId(runId);
+    if (threadId === undefined) {
+      throw new Error('development run has no resumable Codex thread');
+    }
+    const completed = deferred<void>();
+    let server: CodexAppServer | undefined;
+    try {
+      const launch = this.options.launchAppServer ?? ((input) => CodexAppServer.launch(input));
+      server = await launch({
+        sandboxName: developmentSandboxName(runId),
+        workspaceDirectory: paths.workspaceDirectory,
+        onNotification: (notification) => {
+          this.recordNotification(runId, run.generation, attempt.id, notification);
+          if (notification.method === 'turn/completed') {
+            completed.resolve();
+          }
+        },
+        onRequest: (request) =>
+          this.handleClarification(run.id, run.generation, attempt.id, 'PLANNING', request),
+      });
+      this.#servers.set(run.id, server);
+      await server.resumeThread({ threadId, cwd: paths.workspaceDirectory });
+      const turnId = await server.startTurn({ threadId, prompt });
+      this.options.database.attachAttemptRuntime({
+        id: attempt.id,
+        generation: run.generation,
+        leaseOwner: this.options.workerId,
+        threadId,
+        turnId,
+      });
+      await withTimeout(
+        completed.promise,
+        turnTimeoutMilliseconds,
+        'planning revision turn timed out',
+        signal,
+      );
+      this.options.database.completeAttempt({
+        id: attempt.id,
+        runId,
+        generation: run.generation,
+        leaseOwner: this.options.workerId,
+        state: 'SUCCEEDED',
+        outcomeCode: 'PLAN_REVISED',
+      });
+      const current = this.options.database.requireRun(run.id);
+      this.options.database.requestPlanApproval({
+        runId: current.id,
+        workRevisionId: current.workRevisionId,
+        expectedGeneration: current.generation,
+        expectedLockVersion: current.lockVersion,
+        prompt: 'Approve this revised implementation plan?',
+      });
+    } finally {
+      this.#servers.delete(run.id);
+      server?.close();
+      await this.#resourceLifecycle.stopAndRetain(run.id);
+    }
+  }
+
   private async implement(runId: number, signal: AbortSignal, prompt: string): Promise<void> {
     let run = this.options.database.requireRun(runId);
     const attempt = this.options.database.claimAttempt({
@@ -556,12 +632,13 @@ export class DevelopmentController {
         head_sha: candidate.headSha,
       }),
     });
-    await this.verifyCandidate(run, candidate.hash);
+    await this.verifyCandidate(run, candidate.hash, signal);
   }
 
   private async verifyCandidate(
     inputRun: ReturnType<DevelopmentRepository['requireRun']>,
     candidateHash: string,
+    signal: AbortSignal,
   ): Promise<void> {
     let run = this.options.database.transition({
       id: inputRun.id,
@@ -629,7 +706,7 @@ export class DevelopmentController {
         outcomeCode: 'VERIFICATION_FAILED',
       });
       run = this.options.database.requireRun(run.id);
-      this.options.database.transition({
+      const implementing = this.options.database.transition({
         id: run.id,
         expectedGeneration: run.generation,
         expectedLockVersion: run.lockVersion,
@@ -637,7 +714,7 @@ export class DevelopmentController {
         advanceGeneration: true,
         event: observed('verification_failed'),
       });
-      await this.#resourceLifecycle.stopAndRetain(run.id);
+      await this.implement(implementing.id, signal, verificationFixPrompt(error));
       return;
     }
     run = this.options.database.requireRun(run.id);
@@ -688,7 +765,14 @@ export class DevelopmentController {
     const branch = `codex/development-${run.id}`;
     const completed = deferred<void>();
     let server: CodexAppServer | undefined;
+    let publicationError: unknown;
+    let publicationCapabilityAttempted = false;
+    let publicationRevocationError: unknown;
+    let observedPullRequest:
+      | Awaited<ReturnType<GitHubAppClient['findOpenPullRequest']>>
+      | undefined;
     try {
+      publicationCapabilityAttempted = true;
       await this.options.sandbox.enablePublication(runId);
       const launch = this.options.launchAppServer ?? ((input) => CodexAppServer.launch(input));
       server = await launch({
@@ -757,29 +841,55 @@ export class DevelopmentController {
         url: pullRequest.url,
         headSha: pullRequest.headSha,
       });
-      this.options.database.completeAttempt({
-        id: attempt.id,
-        runId,
-        generation: run.generation,
-        leaseOwner: this.options.workerId,
-        state: 'SUCCEEDED',
-        outcomeCode: 'PULL_REQUEST_OBSERVED',
-      });
-      run = this.options.database.requireRun(runId);
-      this.options.database.transition({
-        id: run.id,
-        expectedGeneration: run.generation,
-        expectedLockVersion: run.lockVersion,
-        phase: 'REVIEWING',
-        advanceGeneration: true,
-        event: observed('review_wait_started', { pull_request: pullRequest.number }),
-      });
+      observedPullRequest = pullRequest;
+    } catch (error) {
+      publicationError = error;
     } finally {
       this.#servers.delete(run.id);
       server?.close();
-      await this.options.sandbox.disablePublication(runId).catch(() => undefined);
-      await this.#resourceLifecycle.stopAndRetain(runId);
+      if (publicationCapabilityAttempted) {
+        try {
+          await this.options.sandbox.disablePublication(runId);
+        } catch (error) {
+          publicationRevocationError = error;
+        }
+      }
+      if (publicationRevocationError === undefined) {
+        await this.#resourceLifecycle.stopAndRetain(runId);
+      }
     }
+    if (publicationRevocationError !== undefined) {
+      await this.#resourceLifecycle.quarantinePublicationFailure(runId, publicationRevocationError);
+      throw new Error(
+        `publication capability revocation failed: ${sanitize(publicationRevocationError instanceof Error ? publicationRevocationError.message : 'unknown revocation failure', 4000)}`,
+        { cause: publicationRevocationError },
+      );
+    }
+    if (publicationError !== undefined) {
+      throw publicationError instanceof Error
+        ? publicationError
+        : new Error('unknown publication failure');
+    }
+    if (observedPullRequest === undefined) {
+      throw new Error('published pull request observation was lost');
+    }
+    this.options.database.completeAttempt({
+      id: attempt.id,
+      runId,
+      generation: run.generation,
+      leaseOwner: this.options.workerId,
+      state: 'SUCCEEDED',
+      outcomeCode: 'PULL_REQUEST_OBSERVED',
+    });
+    run = this.options.database.requireRun(runId);
+    this.options.database.transition({
+      id: run.id,
+      expectedGeneration: run.generation,
+      expectedLockVersion: run.lockVersion,
+      phase: 'REVIEWING',
+      advanceGeneration: true,
+      event: observed('review_wait_started', { pull_request: observedPullRequest.number }),
+    });
   }
 
   private claim(
@@ -908,7 +1018,9 @@ export class DevelopmentController {
     } catch {
       // A newer generation owns the run; the stale failure is intentionally ignored.
     }
-    await this.#resourceLifecycle.stopAndRetain(runId);
+    await this.#resourceLifecycle.stopAndRetain(runId).catch(() => {
+      // The lifecycle records UNKNOWN or CLEANUP_FAILED before throwing; the failed run remains inspectable.
+    });
   }
 }
 

@@ -12,7 +12,15 @@ import { DevelopmentRepository } from '../../../src/storage/development-reposito
 import { DevelopmentResourceRepository } from '../../../src/storage/development-resource-repository.js';
 import { runMigrations } from '../../../src/storage/migrations/index.js';
 
-function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error } = {}) {
+function setup(
+  input: {
+    clarifyDuringPlanning?: boolean;
+    disablePublicationFailure?: Error;
+    prepareFailure?: Error;
+    stopFailure?: Error;
+    verificationFailures?: Error[];
+  } = {},
+) {
   const database = openDatabase(':memory:');
   runMigrations(database);
   const repository = new DevelopmentRepository(database);
@@ -44,12 +52,25 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
     createRepositoryReadToken: vi.fn().mockResolvedValue('read-token'),
     findOpenPullRequest,
   } as unknown as GitHubAppClient;
-  const stop = vi.fn().mockResolvedValue(undefined);
+  const stop =
+    input.stopFailure === undefined
+      ? vi.fn().mockResolvedValue(undefined)
+      : vi.fn().mockRejectedValue(input.stopFailure);
   const enablePublication = vi.fn().mockResolvedValue(undefined);
-  const disablePublication = vi.fn().mockResolvedValue(undefined);
+  const disablePublication =
+    input.disablePublicationFailure === undefined
+      ? vi.fn().mockResolvedValue(undefined)
+      : vi.fn().mockRejectedValue(input.disablePublicationFailure);
   const cleanup = vi.fn().mockResolvedValue(undefined);
   const hasRetainedWorkspace = vi.fn().mockReturnValue(true);
   const candidateHash = 'c'.repeat(64);
+  const verificationFailures = [...(input.verificationFailures ?? [])];
+  const runVerification = vi.fn().mockImplementation(() => {
+    const failure = verificationFailures.shift();
+    return failure === undefined
+      ? Promise.resolve({ stdout: '', stderr: '' })
+      : Promise.reject(failure);
+  });
   const sandbox = {
     prepare:
       input.prepareFailure === undefined
@@ -70,7 +91,7 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
       headSha: 'b'.repeat(40),
       dirty: false,
     }),
-    runVerification: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+    runVerification,
     enablePublication,
     disablePublication,
     cleanup,
@@ -162,6 +183,7 @@ function setup(input: { clarifyDuringPlanning?: boolean; prepareFailure?: Error 
     getLastTurnPrompt: () => turnPrompts.at(-1),
     getLastTurnSkills: () => turnSkills.at(-1),
     repository,
+    runVerification,
     run,
     sandbox,
     startTurn,
@@ -362,6 +384,7 @@ describe('DevelopmentController planning', () => {
       interruptId: approval.id,
       interruptLockVersion: approval.lockVersion,
       approve: true,
+      response: 'Keep the existing API contract unchanged.',
     });
 
     const run = context.repository.requireRun(context.run.id);
@@ -375,6 +398,100 @@ describe('DevelopmentController planning', () => {
       publicationKind: 'PUSH_AND_PR',
     });
     expect(context.repository.findActiveAttempt(run.id)).toBeUndefined();
+    expect(context.getLastTurnPrompt()).toContain('Keep the existing API contract unchanged.');
+    context.database.close();
+  });
+
+  it('revises a rejected plan on the same thread and requests approval again', async () => {
+    const context = setup();
+    await context.controller.startPlanning(context.run.id);
+    const approval = context.repository.getOpenInterrupt(context.run.id);
+    if (approval === undefined) {
+      throw new Error('plan approval was not created');
+    }
+
+    await context.controller.approvePlan({
+      runId: context.run.id,
+      interruptId: approval.id,
+      interruptLockVersion: approval.lockVersion,
+      approve: false,
+      response: 'Reduce the scope to the repository picker.',
+    });
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe('AWAITING_PLAN_APPROVAL');
+    expect(context.repository.getOpenInterrupt(context.run.id)).toMatchObject({
+      kind: 'PLAN_APPROVAL',
+      prompt: 'Approve this revised implementation plan?',
+    });
+    expect(context.startTurn).toHaveBeenCalledTimes(2);
+    expect(context.getLastTurnPrompt()).toContain('Reduce the scope to the repository picker.');
+    context.database.close();
+  });
+
+  it('revises a rejected publication candidate and verifies the replacement automatically', async () => {
+    const context = setup();
+    await context.controller.startPlanning(context.run.id);
+    const plan = context.repository.getOpenInterrupt(context.run.id);
+    if (plan === undefined) {
+      throw new Error('plan approval was not created');
+    }
+    await context.controller.approvePlan({
+      runId: context.run.id,
+      interruptId: plan.id,
+      interruptLockVersion: plan.lockVersion,
+      approve: true,
+    });
+    const publication = context.repository.getOpenInterrupt(context.run.id);
+    if (publication?.candidateHash === undefined) {
+      throw new Error('publication approval was not created');
+    }
+
+    await context.controller.approvePublication({
+      runId: context.run.id,
+      interruptId: publication.id,
+      interruptLockVersion: publication.lockVersion,
+      candidateHash: publication.candidateHash,
+      approve: false,
+      response: 'Remove the unrelated copy change before publishing.',
+    });
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe(
+      'AWAITING_PUBLICATION_APPROVAL',
+    );
+    expect(context.getLastTurnPrompt()).toContain(
+      'Remove the unrelated copy change before publishing.',
+    );
+    expect(context.runVerification).toHaveBeenCalledTimes(2);
+    context.database.close();
+  });
+
+  it('returns deterministic verification failures to implementation until they pass', async () => {
+    const context = setup({ verificationFailures: [new Error('typecheck failed in src/a.ts')] });
+    await context.controller.startPlanning(context.run.id);
+    const plan = context.repository.getOpenInterrupt(context.run.id);
+    if (plan === undefined) {
+      throw new Error('plan approval was not created');
+    }
+
+    await context.controller.approvePlan({
+      runId: context.run.id,
+      interruptId: plan.id,
+      interruptLockVersion: plan.lockVersion,
+      approve: true,
+    });
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe(
+      'AWAITING_PUBLICATION_APPROVAL',
+    );
+    expect(context.runVerification).toHaveBeenCalledTimes(2);
+    expect(context.startTurn).toHaveBeenCalledTimes(3);
+    expect(context.getLastTurnPrompt()).toContain('typecheck failed in src/a.ts');
+    expect(context.repository.listEvidence(context.run.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ verdict: 'FAILED' }),
+        expect.objectContaining({ verdict: 'PASSED' }),
+      ]),
+    );
     context.database.close();
   });
 
@@ -417,6 +534,50 @@ describe('DevelopmentController planning', () => {
         .listEvents(context.run.id)
         .some((event) => event.type === 'pull_request_observed'),
     ).toBe(true);
+    context.database.close();
+  });
+
+  it('fails closed and quarantines the sandbox when publication capability revocation fails', async () => {
+    const context = setup({
+      disablePublicationFailure: new Error('network policy restore failed'),
+    });
+
+    await publishCandidate(context);
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe('FAILED');
+    const resources = context.controller.options.resources.list(context.run.id);
+    expect(resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'SANDBOX',
+          state: 'CLEANUP_FAILED',
+        }),
+        expect.objectContaining({ kind: 'WORKSPACE', state: 'RETAINED' }),
+        expect.objectContaining({ kind: 'BRANCH', state: 'RETAINED' }),
+      ]),
+    );
+    expect(resources.find((resource) => resource.kind === 'SANDBOX')?.lastError).toContain(
+      'network policy restore failed',
+    );
+    context.database.close();
+  });
+
+  it('records an unknown sandbox state instead of claiming a failed stop succeeded', async () => {
+    const context = setup({ stopFailure: new Error('sandbox stop failed') });
+
+    await context.controller.startPlanning(context.run.id);
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe('FAILED');
+    expect(context.controller.options.resources.list(context.run.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'SANDBOX',
+          state: 'UNKNOWN',
+          lastError: 'sandbox stop failed',
+        }),
+        expect.objectContaining({ kind: 'WORKSPACE', state: 'RETAINED' }),
+      ]),
+    );
     context.database.close();
   });
 
@@ -491,15 +652,23 @@ describe('DevelopmentController planning', () => {
     });
     expect(context.repository.requireRun(context.run.id).phase).toBe('AWAITING_MERGE');
 
-    context.controller.observePullRequestMerged({
+    await context.controller.observePullRequestClosed({
+      action: 'closed',
+      deliveryId: 'stale-merge',
       headSha: 'd'.repeat(40),
+      installationId: 1,
+      merged: true,
       pullRequestNumber: 12,
       repository: 'example/leverframe',
     });
     expect(context.repository.requireRun(context.run.id).phase).toBe('AWAITING_MERGE');
 
-    context.controller.observePullRequestMerged({
+    await context.controller.observePullRequestClosed({
+      action: 'closed',
+      deliveryId: 'current-merge',
       headSha: 'b'.repeat(40),
+      installationId: 1,
+      merged: true,
       pullRequestNumber: 12,
       repository: 'example/leverframe',
     });
@@ -514,5 +683,58 @@ describe('DevelopmentController planning', () => {
       expect.arrayContaining([expect.objectContaining({ state: 'CLEANED' })]),
     );
     context.database.close();
+  });
+
+  it('completes an exact merged candidate directly from review', async () => {
+    const context = setup();
+    await publishCandidate(context);
+
+    await context.controller.observePullRequestClosed({
+      action: 'closed',
+      deliveryId: 'early-merge',
+      headSha: 'b'.repeat(40),
+      installationId: 1,
+      merged: true,
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+
+    expect(context.repository.requireRun(context.run.id).phase).toBe('COMPLETED');
+    context.database.close();
+  });
+
+  it('cancels a closed unmerged pull request but keeps draft review work waiting', async () => {
+    const draft = setup();
+    await publishCandidate(draft);
+    await draft.controller.observePullRequestClosed({
+      action: 'converted_to_draft',
+      deliveryId: 'draft',
+      headSha: 'b'.repeat(40),
+      installationId: 1,
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+    expect(draft.repository.requireRun(draft.run.id).phase).toBe('REVIEWING');
+    draft.database.close();
+
+    const closed = setup();
+    await publishCandidate(closed);
+    await closed.controller.observePullRequestClosed({
+      action: 'closed',
+      deliveryId: 'closed',
+      headSha: 'b'.repeat(40),
+      installationId: 1,
+      merged: false,
+      pullRequestNumber: 12,
+      repository: 'example/leverframe',
+    });
+    expect(closed.repository.requireRun(closed.run.id).phase).toBe('CANCELLED');
+    expect(closed.controller.options.resources.list(closed.run.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'SANDBOX', state: 'STOPPED' }),
+        expect.objectContaining({ kind: 'WORKSPACE', state: 'RETAINED' }),
+      ]),
+    );
+    closed.database.close();
   });
 });

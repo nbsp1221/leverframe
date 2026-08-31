@@ -54,16 +54,24 @@ export async function getDevelopmentRepositories(): Promise<
     return { kind: 'missing-config' };
   }
   try {
-    const url = new URL('api/v1/development/repositories', base);
-    url.searchParams.set('per_page', '100');
-    const response = await fetch(url, {
-      cache: 'no-store',
-    });
-    if (!response.ok) {
-      return { kind: 'http-error', status: response.status };
+    const repositories: DevelopmentRepository[] = [];
+    for (let page = 1; ; page += 1) {
+      const url = new URL('api/v1/development/repositories', base);
+      url.searchParams.set('page', String(page));
+      url.searchParams.set('per_page', '100');
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) {
+        return { kind: 'http-error', status: response.status };
+      }
+      const parsed = developmentRepositoryListSchema.safeParse(await response.json());
+      if (!parsed.success) {
+        return { kind: 'schema-error' };
+      }
+      repositories.push(...parsed.data.items);
+      if (parsed.data.items.length < 100) {
+        return { kind: 'ok', data: repositories };
+      }
     }
-    const parsed = developmentRepositoryListSchema.safeParse(await response.json());
-    return parsed.success ? { kind: 'ok', data: parsed.data.items } : { kind: 'schema-error' };
   } catch {
     return { kind: 'network-error' };
   }

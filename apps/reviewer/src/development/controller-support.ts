@@ -46,6 +46,25 @@ export const developmentInstructions =
 export const implementationPrompt =
   'The operator approved the plan. Implement it completely, follow repository guidance, use the supplied commit skill for coherent local commits, and run repository-appropriate tests, lint, type checks, builds, and real QA. Do not push or create or modify a pull request.';
 
+export function approvedImplementationPrompt(response?: string): string {
+  return response?.trim()
+    ? `${implementationPrompt}\n\nOperator note for this approval:\n${sanitize(response, 4000)}`
+    : implementationPrompt;
+}
+
+export function planRevisionPrompt(response?: string): string {
+  return `The operator rejected the proposed plan and requested a revision. Re-evaluate the existing goal and repository context, then propose a corrected implementation plan without modifying files. Preserve sound parts of the prior plan and address this operator feedback explicitly:\n\n${sanitize(response?.trim() || 'No additional note was supplied.', 4000)}`;
+}
+
+export function publicationRevisionPrompt(response?: string): string {
+  return `The operator rejected publication of the current candidate and requested another implementation revision. Re-evaluate the current candidate, make the smallest coherent changes needed to address the feedback, use the supplied commit skill for coherent local commits, and rerun repository-appropriate verification and real QA. Do not push or create or modify a pull request.\n\nOperator feedback:\n${sanitize(response?.trim() || 'No additional note was supplied.', 4000)}`;
+}
+
+export function verificationFixPrompt(error: unknown): string {
+  const observation = sanitize(error instanceof Error ? error.message : String(error), 4000);
+  return `Deterministic verification of the current committed candidate failed. Diagnose the failure from the bounded observation below, fix the implementation if the failure is valid, commit coherent changes with the supplied commit skill, and rerun repository-appropriate verification and real QA. Do not push or create or modify a pull request.\n\nVerification observation:\n${observation}`;
+}
+
 export function planningPrompt(goal: string): string {
   return `Analyze the repository and propose the smallest coherent implementation plan for this accepted goal:\n\n${goal}\n\nDo not modify files in this planning turn. State material ambiguities as explicit questions. Otherwise provide a concrete plan, verification strategy, and risks for operator approval.`;
 }

@@ -49,19 +49,72 @@ export class DevelopmentResourceLifecycle {
   }
 
   async stopAndRetain(runId: number): Promise<void> {
-    await this.options.sandbox.stop(runId).catch(() => undefined);
+    let stopError: unknown;
+    try {
+      await this.options.sandbox.stop(runId);
+    } catch (error) {
+      stopError = error;
+    }
+    const run = this.options.database.getRun(runId);
+    if (run === undefined) {
+      if (stopError !== undefined) {
+        throw toError(stopError);
+      }
+      return;
+    }
+    for (const resource of this.options.resources.list(runId)) {
+      const quarantined = resource.kind === 'SANDBOX' && resource.state === 'CLEANUP_FAILED';
+      this.options.resources.observe({
+        runId,
+        kind: resource.kind,
+        provider: resource.provider,
+        externalId: resource.externalId,
+        state:
+          resource.kind === 'SANDBOX'
+            ? quarantined
+              ? 'CLEANUP_FAILED'
+              : stopError === undefined
+                ? 'STOPPED'
+                : 'UNKNOWN'
+            : 'RETAINED',
+        generation: run.generation,
+        ...(quarantined
+          ? { error: resource.lastError ?? 'sandbox is quarantined' }
+          : stopError === undefined || resource.kind !== 'SANDBOX'
+            ? {}
+            : { error: errorMessage(stopError) }),
+      });
+    }
+    if (stopError !== undefined) {
+      throw toError(stopError);
+    }
+  }
+
+  async quarantinePublicationFailure(runId: number, failure: unknown): Promise<void> {
+    let stopError: unknown;
+    try {
+      await this.options.sandbox.stop(runId);
+    } catch (error) {
+      stopError = error;
+    }
     const run = this.options.database.getRun(runId);
     if (run === undefined) {
       return;
     }
+    const failureMessage = errorMessage(failure);
+    const quarantineError =
+      stopError === undefined
+        ? failureMessage
+        : `${failureMessage}; sandbox stop also failed: ${errorMessage(stopError)}`;
     for (const resource of this.options.resources.list(runId)) {
       this.options.resources.observe({
         runId,
         kind: resource.kind,
         provider: resource.provider,
         externalId: resource.externalId,
-        state: resource.kind === 'SANDBOX' ? 'STOPPED' : 'RETAINED',
+        state: resource.kind === 'SANDBOX' ? 'CLEANUP_FAILED' : 'RETAINED',
         generation: run.generation,
+        ...(resource.kind === 'SANDBOX' ? { error: quarantineError } : {}),
       });
     }
   }
@@ -137,4 +190,12 @@ function resourceIdentities(runId: number) {
 
 function branchName(runId: number): string {
   return `codex/development-${runId}`;
+}
+
+function errorMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 4000);
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
