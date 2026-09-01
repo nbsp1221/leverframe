@@ -1,7 +1,18 @@
 'use client';
 
 import type { DevelopmentInterrupt, DevelopmentRunDetail } from '@repo/contracts';
-import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
+import { Alert, AlertTitle } from '@repo/ui/components/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@repo/ui/components/alert-dialog';
 import { Badge } from '@repo/ui/components/badge';
 import { Button } from '@repo/ui/components/button';
 import {
@@ -20,9 +31,9 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@repo/ui/compon
 import { Separator } from '@repo/ui/components/separator';
 import { Spinner } from '@repo/ui/components/spinner';
 import { Textarea } from '@repo/ui/components/textarea';
-import { ChevronDownIcon, ChevronUpIcon, CircleAlertIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Link, useRouter } from '../../i18n/navigation';
 import { DevelopmentActivity, DevelopmentWorkflowProgress } from './development-run-presentation';
 
@@ -32,7 +43,7 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
   const router = useRouter();
   const [pendingInterruptId, setPendingInterruptId] = useState<number>();
   const [approvalError, setApprovalError] = useState<{ interruptId: number; message: string }>();
-  const { pendingRunAction, runAction } = useRunResourceAction(detail.run.id);
+  const { pendingRunAction, runAction, runActionError } = useRunResourceAction(detail.run.id);
   const lastSequence = detail.events.at(-1)?.sequence ?? 0;
   const pending = pendingInterruptId === detail.interrupt?.id;
   const error =
@@ -122,64 +133,14 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
         pendingAction={pendingRunAction}
         onAction={(action) => void runAction(action)}
       />
-      {detail.interrupt?.kind === 'plan_approval' || detail.interrupt?.kind === 'clarification' ? (
-        <Alert>
-          <CircleAlertIcon />
-          <AlertTitle>{t('actionRequired')}</AlertTitle>
-          <AlertDescription>{detail.interrupt.prompt}</AlertDescription>
+      {runActionError === undefined ? null : (
+        <Alert variant="destructive">
+          <AlertTitle>{runActionError}</AlertTitle>
         </Alert>
-      ) : null}
+      )}
       <DevelopmentWorkflowProgress detail={detail} />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <DevelopmentActivity events={detail.events} />
-        <div className="flex flex-col gap-6">
-          {detail.external_source === null ? null : (
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle>{t('externalSource')}</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm">
-                <span className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">{detail.external_source.provider}</span>
-                  {detail.external_source.url === null ? (
-                    <strong>{detail.external_source.key ?? detail.external_source.id}</strong>
-                  ) : (
-                    <a
-                      className="font-medium underline-offset-4 hover:underline"
-                      href={detail.external_source.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      {detail.external_source.key ?? detail.external_source.id}
-                    </a>
-                  )}
-                </span>
-                {detail.external_sync === null ? (
-                  <p className="text-muted-foreground">{t('externalSyncPending')}</p>
-                ) : (
-                  <div className="flex flex-col gap-1">
-                    <span className="flex items-center justify-between gap-3">
-                      <span>{t('externalSync')}</span>
-                      <Badge
-                        variant={
-                          detail.external_sync.state === 'confirmed' ? 'secondary' : 'outline'
-                        }
-                      >
-                        {detail.external_sync.status}
-                      </Badge>
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {t(`externalSyncState_${detail.external_sync.state}`)} ·{' '}
-                      {dateTime.format(new Date(detail.external_sync.updated_at))}
-                    </span>
-                    {detail.external_sync.last_error === null ? null : (
-                      <p className="text-xs text-destructive">{detail.external_sync.last_error}</p>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+        <div className="flex min-w-0 flex-col gap-6">
           {detail.interrupt?.kind === 'clarification' && detail.interrupt.questions !== null ? (
             <ClarificationCard
               interrupt={{ ...detail.interrupt, questions: detail.interrupt.questions }}
@@ -192,7 +153,10 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
                 <CardTitle>{t('approvePlan')}</CardTitle>
                 <CardDescription>{t('approvePlanDescription')}</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex flex-col gap-4">
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                  {detail.interrupt.prompt}
+                </p>
                 <form action={approvePlan}>
                   <FieldGroup>
                     <Field>
@@ -221,6 +185,9 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
                 <CardDescription>{t('approvePublicationDescription')}</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                  {detail.interrupt.prompt}
+                </p>
                 <code className="break-all rounded-md bg-muted p-3 text-xs">
                   {detail.interrupt.candidate_hash}
                 </code>
@@ -236,37 +203,75 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
               </CardContent>
             </Card>
           ) : null}
-          {detail.evidence.length === 0 ? null : (
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle>{t('evidence')}</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                {detail.evidence.map((evidence) => (
-                  <div key={evidence.id} className="flex flex-col gap-2">
-                    <span className="flex items-center justify-between gap-2">
-                      <strong className="text-sm">{evidence.criterion}</strong>
-                      <Badge
-                        variant={
-                          evidence.verdict === 'passed'
-                            ? 'secondary'
-                            : evidence.verdict === 'failed'
-                              ? 'destructive'
-                              : 'outline'
-                        }
-                      >
-                        {evidence.verdict}
-                      </Badge>
-                    </span>
-                    <p className="text-sm text-muted-foreground">{evidence.observation}</p>
-                    <Separator />
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-          <DevelopmentResourcesCard detail={detail} />
+          <DevelopmentActivity events={detail.events} />
         </div>
+        <aside aria-label={t('runDetails')} className="rounded-lg border lg:self-start">
+          {detail.external_source === null ? null : (
+            <InspectorSection title={t('externalSource')}>
+              <span className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">{detail.external_source.provider}</span>
+                {detail.external_source.url === null ? (
+                  <strong>{detail.external_source.key ?? detail.external_source.id}</strong>
+                ) : (
+                  <a
+                    className="font-medium underline-offset-4 hover:underline"
+                    href={detail.external_source.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {detail.external_source.key ?? detail.external_source.id}
+                  </a>
+                )}
+              </span>
+              {detail.external_sync === null ? (
+                <p className="text-muted-foreground">{t('externalSyncPending')}</p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <span className="flex items-center justify-between gap-3">
+                    <span>{t('externalSync')}</span>
+                    <Badge
+                      variant={detail.external_sync.state === 'confirmed' ? 'secondary' : 'outline'}
+                    >
+                      {detail.external_sync.status}
+                    </Badge>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {t(`externalSyncState_${detail.external_sync.state}`)} ·{' '}
+                    {dateTime.format(new Date(detail.external_sync.updated_at))}
+                  </span>
+                  {detail.external_sync.last_error === null ? null : (
+                    <p className="text-xs text-destructive">{detail.external_sync.last_error}</p>
+                  )}
+                </div>
+              )}
+            </InspectorSection>
+          )}
+          {detail.evidence.length === 0 ? null : (
+            <InspectorSection title={t('evidence')}>
+              {detail.evidence.map((evidence) => (
+                <div key={evidence.id} className="flex flex-col gap-2">
+                  <span className="flex items-center justify-between gap-2">
+                    <strong className="text-sm">{evidence.criterion}</strong>
+                    <Badge
+                      variant={
+                        evidence.verdict === 'passed'
+                          ? 'secondary'
+                          : evidence.verdict === 'failed'
+                            ? 'destructive'
+                            : 'outline'
+                      }
+                    >
+                      {evidence.verdict}
+                    </Badge>
+                  </span>
+                  <p className="text-sm text-muted-foreground">{evidence.observation}</p>
+                  <Separator />
+                </div>
+              ))}
+            </InspectorSection>
+          )}
+          <DevelopmentResources detail={detail} />
+        </aside>
       </div>
     </div>
   );
@@ -276,23 +281,22 @@ function useRunResourceAction(runId: number) {
   const t = useTranslations('development');
   const router = useRouter();
   const [pendingRunAction, setPendingRunAction] = useState<'cancel' | 'cleanup'>();
+  const [runActionError, setRunActionError] = useState<string>();
 
   async function runAction(action: 'cancel' | 'cleanup') {
-    if (!window.confirm(t(action === 'cancel' ? 'cancelConfirmation' : 'cleanupConfirmation'))) {
-      return;
-    }
     setPendingRunAction(action);
+    setRunActionError(undefined);
     const response = await fetch(`/api/v1/development/runs/${runId}/${action}`, { method: 'POST' });
     if (!response.ok) {
       setPendingRunAction(undefined);
-      window.alert(t(action === 'cancel' ? 'cancelFailed' : 'cleanupFailed'));
+      setRunActionError(t(action === 'cancel' ? 'cancelFailed' : 'cleanupFailed'));
       router.refresh();
       return;
     }
     router.refresh();
   }
 
-  return { pendingRunAction, runAction };
+  return { pendingRunAction, runAction, runActionError };
 }
 
 function DevelopmentRunHeader({
@@ -310,12 +314,14 @@ function DevelopmentRunHeader({
       <Link href="/development" className="text-sm text-muted-foreground hover:text-foreground">
         ← {t('back')}
       </Link>
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground">
           {t('run')} #{detail.run.id}
-        </h1>
+        </span>
         <Badge>{t(`phase_${detail.run.phase}`)}</Badge>
-        <RunResourceActions detail={detail} pendingAction={pendingAction} onAction={onAction} />
+        <span className="ml-auto">
+          <RunResourceActions detail={detail} pendingAction={pendingAction} onAction={onAction} />
+        </span>
       </div>
       <GoalSummary goal={detail.run.goal} />
       <p className="text-sm text-muted-foreground">
@@ -329,18 +335,21 @@ function DevelopmentRunHeader({
 function GoalSummary({ goal }: { goal: string }) {
   const t = useTranslations('development');
   const [open, setOpen] = useState(false);
-  const summary = goal.split(/\r?\n/, 1)[0]?.replaceAll(/\s+/g, ' ').trim() ?? '';
-  const needsDisclosure = summary !== goal.trim() || summary.length > 240;
+  const firstLine = goal.split(/\r?\n/, 1)[0]?.replaceAll(/\s+/g, ' ').trim() ?? '';
+  const summary = firstLine.length > 180 ? `${firstLine.slice(0, 177)}…` : firstLine;
+  const needsDisclosure = summary !== goal.trim();
 
   if (!needsDisclosure) {
-    return <p className="max-w-3xl text-sm text-muted-foreground">{summary}</p>;
+    return <h1 className="max-w-4xl text-2xl font-semibold tracking-tight">{summary}</h1>;
   }
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="max-w-3xl">
-      {open ? null : <p className="line-clamp-2 text-sm text-muted-foreground">{summary}</p>}
+      {open ? null : (
+        <h1 className="line-clamp-2 text-2xl font-semibold tracking-tight">{summary}</h1>
+      )}
       <CollapsibleContent>
-        <p className="whitespace-pre-wrap text-sm text-muted-foreground">{goal}</p>
+        <h1 className="whitespace-pre-wrap text-2xl font-semibold tracking-tight">{goal}</h1>
       </CollapsibleContent>
       <CollapsibleTrigger
         render={<Button type="button" variant="link" size="sm" className="px-0" />}
@@ -368,16 +377,12 @@ function RunResourceActions({
   const t = useTranslations('development');
   if (!['completed', 'failed', 'cancelled'].includes(detail.run.phase)) {
     return (
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={pendingAction !== undefined}
-        onClick={() => onAction('cancel')}
-      >
-        {pendingAction === 'cancel' ? <Spinner data-icon="inline-start" /> : null}
-        {t('cancelRun')}
-      </Button>
+      <RunActionDialog
+        label={t('cancelRun')}
+        confirmation={t('cancelConfirmation')}
+        pending={pendingAction === 'cancel'}
+        onConfirm={() => onAction('cancel')}
+      />
     );
   }
   if (
@@ -387,46 +392,81 @@ function RunResourceActions({
     return null;
   }
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      disabled={pendingAction !== undefined}
-      onClick={() => onAction('cleanup')}
-    >
-      {pendingAction === 'cleanup' ? <Spinner data-icon="inline-start" /> : null}
-      {t('cleanupRun')}
-    </Button>
+    <RunActionDialog
+      label={t('cleanupRun')}
+      confirmation={t('cleanupConfirmation')}
+      pending={pendingAction === 'cleanup'}
+      onConfirm={() => onAction('cleanup')}
+    />
   );
 }
 
-function DevelopmentResourcesCard({ detail }: { detail: DevelopmentRunDetail }) {
+function RunActionDialog({
+  label,
+  confirmation,
+  pending,
+  onConfirm,
+}: {
+  label: string;
+  confirmation: string;
+  pending: boolean;
+  onConfirm: () => void;
+}) {
   const t = useTranslations('development');
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>{t('resources')}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {detail.resources.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t('noResources')}</p>
-        ) : (
-          detail.resources.map((resource) => (
-            <div key={resource.kind} className="flex items-center justify-between gap-3 text-sm">
-              <span className="flex min-w-0 flex-col">
-                <strong>{t(`resource_${resource.kind}`)}</strong>
-                <span className="truncate text-xs text-muted-foreground">
-                  {resource.external_id}
-                </span>
-              </span>
-              <Badge variant={resource.state === 'cleanup_failed' ? 'destructive' : 'outline'}>
-                {t(`resourceState_${resource.state}`)}
-              </Badge>
-            </div>
-          ))
-        )}
-      </CardContent>
-    </Card>
+    <AlertDialog>
+      <AlertDialogTrigger
+        disabled={pending}
+        render={<Button type="button" variant="outline" size="sm" />}
+      >
+        {pending ? <Spinner data-icon="inline-start" /> : null}
+        {label}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{label}</AlertDialogTitle>
+          <AlertDialogDescription>{confirmation}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+          <AlertDialogAction disabled={pending} onClick={onConfirm}>
+            {t('confirm')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function InspectorSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3 border-b p-4 text-sm last:border-b-0">
+      <h2 className="font-medium">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function DevelopmentResources({ detail }: { detail: DevelopmentRunDetail }) {
+  const t = useTranslations('development');
+  return (
+    <InspectorSection title={t('resources')}>
+      {detail.resources.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t('noResources')}</p>
+      ) : (
+        detail.resources.map((resource) => (
+          <div key={resource.kind} className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex min-w-0 flex-col">
+              <strong>{t(`resource_${resource.kind}`)}</strong>
+              <span className="truncate text-xs text-muted-foreground">{resource.external_id}</span>
+            </span>
+            <Badge variant={resource.state === 'cleanup_failed' ? 'destructive' : 'outline'}>
+              {t(`resourceState_${resource.state}`)}
+            </Badge>
+          </div>
+        ))
+      )}
+    </InspectorSection>
   );
 }
 

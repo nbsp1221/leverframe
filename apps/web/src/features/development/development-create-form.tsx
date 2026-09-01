@@ -28,6 +28,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from '@repo/ui/components/field';
+import { SheetClose, SheetFooter } from '@repo/ui/components/sheet';
 import { Spinner } from '@repo/ui/components/spinner';
 import { Textarea } from '@repo/ui/components/textarea';
 import { ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
@@ -115,44 +116,8 @@ export function DevelopmentCreateForm({
   }
 
   return (
-    <form action={submit}>
-      <FieldGroup>
-        <Collapsible open={ticketPickerOpen} onOpenChange={setTicketPickerOpen}>
-          <CollapsibleTrigger
-            render={
-              <Button type="button" variant="ghost" className="w-full justify-between px-0" />
-            }
-          >
-            <span className="flex flex-col items-start gap-0.5 text-left">
-              <span>{t('ticketImport')}</span>
-              <span className="text-xs font-normal text-muted-foreground">
-                {tickets === null ? t('ticketUnavailableShort') : t('ticketImportDescription')}
-              </span>
-            </span>
-            {ticketPickerOpen ? (
-              <ChevronUpIcon data-icon="inline-end" />
-            ) : (
-              <ChevronDownIcon data-icon="inline-end" />
-            )}
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-4">
-            {tickets === null ? (
-              <FieldDescription>{t('ticketUnavailable')}</FieldDescription>
-            ) : (
-              <DevelopmentTicketPicker
-                tickets={tickets}
-                selectedId={ticketId}
-                pending={pending}
-                onSelect={(id) => {
-                  setTicketId(id);
-                  setExternalSource(undefined);
-                  setRepositorySuggestions(undefined);
-                }}
-                onImport={() => void importTicket()}
-              />
-            )}
-          </CollapsibleContent>
-        </Collapsible>
+    <form action={submit} className="flex min-h-0 flex-1 flex-col">
+      <FieldGroup className="flex-1 overflow-y-auto px-4 pb-4">
         <Field>
           <FieldLabel htmlFor="development-repository">{t('repository')}</FieldLabel>
           <Combobox items={repositoryNames} value={repository} onValueChange={setRepository}>
@@ -211,19 +176,59 @@ export function DevelopmentCreateForm({
             name="goal"
             required
             maxLength={20_000}
-            rows={5}
+            rows={7}
             value={goal}
             onChange={(event) => setGoal(event.target.value)}
             placeholder={t('goalPlaceholder')}
             aria-invalid={error !== undefined}
           />
+          <FieldDescription>{t('goalDescription')}</FieldDescription>
           <FieldError>{error}</FieldError>
         </Field>
+        <Collapsible open={ticketPickerOpen} onOpenChange={setTicketPickerOpen}>
+          <CollapsibleTrigger
+            render={
+              <Button type="button" variant="ghost" className="w-full justify-between px-0" />
+            }
+          >
+            <span className="flex flex-col items-start gap-0.5 text-left">
+              <span>{t('ticketImport')}</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                {tickets === null ? t('ticketUnavailableShort') : t('ticketImportDescription')}
+              </span>
+            </span>
+            {ticketPickerOpen ? (
+              <ChevronUpIcon data-icon="inline-end" />
+            ) : (
+              <ChevronDownIcon data-icon="inline-end" />
+            )}
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-3">
+            {tickets === null ? (
+              <FieldDescription>{t('ticketUnavailable')}</FieldDescription>
+            ) : (
+              <DevelopmentTicketPicker
+                tickets={tickets}
+                selectedId={ticketId}
+                pending={pending}
+                onSelect={(id) => {
+                  setTicketId(id);
+                  setExternalSource(undefined);
+                  setRepositorySuggestions(undefined);
+                }}
+                onImport={() => void importTicket()}
+              />
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      </FieldGroup>
+      <SheetFooter className="border-t">
+        <SheetClose render={<Button type="button" variant="outline" />}>{t('cancel')}</SheetClose>
         <Button type="submit" disabled={pending || repository === null || goal.trim() === ''}>
           {pending ? <Spinner data-icon="inline-start" /> : null}
           {t('startRun')}
         </Button>
-      </FieldGroup>
+      </SheetFooter>
     </form>
   );
 }
