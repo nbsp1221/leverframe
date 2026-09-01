@@ -163,6 +163,8 @@
     "stopped": "Stopped",
     "conversation": "Conversation",
     "conversationDescription": "Questions, decisions, and agent results in chronological order.",
+    "agentActivity": "Agent activity",
+    "agentActivityDescription": "Messages and system events from the current run.",
     "scrollLatest": "Scroll to latest message",
     "noAgentMessages": "No agent messages yet.",
     "showFullMessage": "Show full message",

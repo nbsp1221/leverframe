@@ -11,7 +11,6 @@ import {
 import { Separator } from '@repo/ui/components/separator';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useState } from 'react';
-import { DevelopmentWorkflowOverview } from './development-run-presentation';
 
 export function DevelopmentRunOverview({ detail }: { detail: DevelopmentRunDetail }) {
   const t = useTranslations('development');
@@ -28,8 +27,6 @@ export function DevelopmentRunOverview({ detail }: { detail: DevelopmentRunDetai
           value={<OverviewDate value={detail.run.last_activity_at} />}
         />
       </OverviewSection>
-      <Separator />
-      <DevelopmentWorkflowOverview detail={detail} />
       <Separator />
       <EvidenceOverview detail={detail} />
       <Separator />

@@ -1,6 +1,7 @@
 'use client';
 
 import type { DevelopmentEvent, DevelopmentRunDetail } from '@repo/contracts';
+import { Badge } from '@repo/ui/components/badge';
 import { Button } from '@repo/ui/components/button';
 import {
   Collapsible,
@@ -52,11 +53,21 @@ export function DevelopmentWorkflowOverview({ detail }: { detail: DevelopmentRun
   const completed = detail.run.phase === 'completed';
 
   return (
-    <section className="flex flex-col gap-1.5 px-2 py-2.5" aria-labelledby={titleId}>
-      <h2 id={titleId} className="px-2 text-xs font-medium text-muted-foreground">
-        {t('graph')}
-      </h2>
-      <ol className="flex flex-col gap-0.5">
+    <section className="shrink-0 py-4" aria-labelledby={titleId}>
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div>
+          <h2 id={titleId} className="text-sm font-medium">
+            {t('graph')}
+          </h2>
+          <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">
+            {t('graphDescription')}
+          </p>
+        </div>
+        <Badge variant="secondary" className="shrink-0">
+          {t(`phase_${detail.run.phase}`)}
+        </Badge>
+      </div>
+      <ol className="grid gap-2 md:grid-cols-6 md:gap-0">
         {workflowMilestones.map((milestone, index) => {
           const reached = completed || index < currentMilestone;
           const current = !completed && index === currentMilestone;
@@ -65,17 +76,45 @@ export function DevelopmentWorkflowOverview({ detail }: { detail: DevelopmentRun
           return (
             <li
               key={milestone.label}
-              className={cn(
-                'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground',
-                current && 'bg-muted font-medium text-foreground',
-              )}
+              className="relative flex min-w-0 items-center gap-3 md:flex-col md:gap-2 md:text-center"
+              aria-current={current ? 'step' : undefined}
             >
-              <Icon aria-hidden="true" className="size-3.5 shrink-0" />
-              <span>{t(milestone.label)}</span>
-              {stopped ? <span className="ml-auto text-xs">{t('stopped')}</span> : null}
-              {!terminal && current ? (
-                <span className="ml-auto text-xs">{t('current')}</span>
-              ) : null}
+              {index === 0 ? null : (
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'absolute -top-2 left-3 h-2 w-px bg-border md:top-3 md:right-1/2 md:left-auto md:h-px md:w-full',
+                    (reached || current) && 'bg-primary',
+                  )}
+                />
+              )}
+              <span
+                className={cn(
+                  'relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border bg-background text-muted-foreground',
+                  (reached || completed) && 'border-primary bg-primary text-primary-foreground',
+                  current && 'border-primary text-primary',
+                  stopped && 'border-destructive text-destructive',
+                )}
+              >
+                <Icon
+                  aria-hidden="true"
+                  className={cn('size-3.5', current && !stopped && 'fill-current')}
+                />
+              </span>
+              <span className="flex min-w-0 items-baseline gap-2 md:flex-col md:items-center md:gap-0.5">
+                <span
+                  className={cn(
+                    'truncate text-sm text-muted-foreground',
+                    (current || completed) && 'font-medium text-foreground',
+                  )}
+                >
+                  {t(milestone.label)}
+                </span>
+                {stopped ? <span className="text-xs text-destructive">{t('stopped')}</span> : null}
+                {!terminal && current ? (
+                  <span className="text-xs text-primary">{t('current')}</span>
+                ) : null}
+              </span>
             </li>
           );
         })}
@@ -96,10 +135,13 @@ export function DevelopmentActivity({ events }: { events: DevelopmentEvent[] }) 
   );
 
   return (
-    <section className="min-h-0 min-w-0 flex-1">
-      <h1 id="agent-activity-title" className="sr-only">
-        {t('conversation')}
-      </h1>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="mb-3 shrink-0">
+        <h2 id="agent-activity-title" className="text-sm font-medium">
+          {t('agentActivity')}
+        </h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('agentActivityDescription')}</p>
+      </div>
       <MessageScrollerProvider defaultScrollPosition="end">
         <MessageScroller>
           <MessageScrollerViewport aria-label={t('conversation')}>

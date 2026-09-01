@@ -29,6 +29,7 @@ import {
   CollapsibleTrigger,
 } from '@repo/ui/components/collapsible';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@repo/ui/components/field';
+import { Separator } from '@repo/ui/components/separator';
 import {
   Sheet,
   SheetClose,
@@ -45,7 +46,7 @@ import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { Link, useRouter } from '../../i18n/navigation';
 import { DevelopmentRunOverview } from './development-run-overview';
-import { DevelopmentActivity } from './development-run-presentation';
+import { DevelopmentActivity, DevelopmentWorkflowOverview } from './development-run-presentation';
 
 export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail }) {
   const t = useTranslations('development');
@@ -166,18 +167,23 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
         pendingAction={pendingRunAction}
         onAction={(action) => void runAction(action)}
       />
-      <div className="mx-auto flex min-h-0 w-full max-w-[800px] flex-1 flex-col py-4">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-4 sm:px-6 lg:px-8">
         {runActionError === undefined ? null : (
-          <Alert variant="destructive" className="mb-4 shrink-0">
+          <Alert variant="destructive" className="mt-4 shrink-0">
             <AlertTitle>{runActionError}</AlertTitle>
           </Alert>
         )}
-        <DevelopmentActivity events={detail.events} />
-        {interrupt === null ? null : (
-          <section aria-label={t('actionRequired')} className="shrink-0 border-t pt-4 pb-2">
-            {interrupt}
-          </section>
-        )}
+        <DevelopmentWorkflowOverview detail={detail} />
+        <Separator />
+        <div className="mx-auto flex min-h-0 w-full max-w-[800px] flex-1 flex-col pt-4">
+          <DevelopmentActivity events={detail.events} />
+          {interrupt === null ? null : (
+            <section aria-label={t('actionRequired')} className="shrink-0 pt-3 pb-2">
+              <Separator className="mb-4" />
+              {interrupt}
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -209,9 +215,9 @@ function DevelopmentRunHeader({
       <span className="shrink-0 text-xs text-muted-foreground">
         {t('run')} #{detail.run.id}
       </span>
-      <span className="truncate text-sm font-medium" title={detail.run.goal}>
+      <h1 className="truncate text-sm font-medium" title={detail.run.goal}>
         {goalSummary}
-      </span>
+      </h1>
       <Badge className="shrink-0" variant="secondary">
         {t(`phase_${detail.run.phase}`)}
       </Badge>
