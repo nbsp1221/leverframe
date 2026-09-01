@@ -160,22 +160,24 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
   })();
 
   return (
-    <div className="-my-6 flex min-h-[calc(100svh-3.5rem)] min-w-0 flex-col">
+    <div className="-my-6 flex h-[calc(100svh-3.5rem)] min-w-0 flex-col">
       <DevelopmentRunHeader
         detail={detail}
         pendingAction={pendingRunAction}
         onAction={(action) => void runAction(action)}
       />
-      {runActionError === undefined ? null : (
-        <Alert variant="destructive" className="mx-auto mt-4 w-full max-w-[800px]">
-          <AlertTitle>{runActionError}</AlertTitle>
-        </Alert>
-      )}
-      <div className="mx-auto grid w-full min-w-0 max-w-[1052px] flex-1 grid-cols-[minmax(0,800px)] justify-center gap-3 py-6 lg:grid-cols-[minmax(320px,800px)_240px] lg:items-start">
-        <DevelopmentActivity events={detail.events}>{interrupt}</DevelopmentActivity>
-        <aside aria-label={t('runDetails')} className="hidden lg:block">
-          <DevelopmentRunOverview detail={detail} />
-        </aside>
+      <div className="mx-auto flex min-h-0 w-full max-w-[800px] flex-1 flex-col py-4">
+        {runActionError === undefined ? null : (
+          <Alert variant="destructive" className="mb-4 shrink-0">
+            <AlertTitle>{runActionError}</AlertTitle>
+          </Alert>
+        )}
+        <DevelopmentActivity events={detail.events} />
+        {interrupt === null ? null : (
+          <section aria-label={t('actionRequired')} className="shrink-0 border-t pt-4 pb-2">
+            {interrupt}
+          </section>
+        )}
       </div>
     </div>
   );
@@ -194,7 +196,7 @@ function DevelopmentRunHeader({
   const goalSummary = summarizeGoal(detail.run.goal);
 
   return (
-    <header className="-mx-4 flex min-h-10 min-w-0 items-center gap-2 border-b px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+    <header className="-mx-4 flex min-h-12 min-w-0 items-center gap-2 border-b px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
       <Button
         variant="ghost"
         size="icon-sm"
@@ -221,9 +223,7 @@ function DevelopmentRunHeader({
       </span>
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <Sheet>
-          <SheetTrigger
-            render={<Button type="button" variant="outline" size="sm" className="lg:hidden" />}
-          >
+          <SheetTrigger render={<Button type="button" variant="outline" size="sm" />}>
             <PanelRightIcon data-icon="inline-start" aria-hidden="true" />
             {t('details')}
           </SheetTrigger>
@@ -249,7 +249,7 @@ function DevelopmentRunHeader({
               <XIcon aria-hidden="true" />
             </SheetClose>
             <div
-              className="min-h-0 overflow-y-auto p-4"
+              className="min-h-0 overflow-y-auto px-2 pb-4"
               tabIndex={0}
               role="region"
               aria-label={t('runDetailsContent')}

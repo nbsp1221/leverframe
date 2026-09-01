@@ -16,7 +16,7 @@ import { DevelopmentWorkflowOverview } from './development-run-presentation';
 export function DevelopmentRunOverview({ detail }: { detail: DevelopmentRunDetail }) {
   const t = useTranslations('development');
   return (
-    <div className="overflow-hidden rounded-xl border">
+    <div className="flex flex-col">
       <GoalOverview goal={detail.run.goal} />
       <Separator />
       <OverviewSection title={t('overview')}>

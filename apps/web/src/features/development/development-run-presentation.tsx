@@ -26,7 +26,7 @@ import {
   CircleStopIcon,
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { type ReactNode, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { normalizeWorkspacePaths } from './development-message';
 
 const workflowMilestones = [
@@ -84,13 +84,7 @@ export function DevelopmentWorkflowOverview({ detail }: { detail: DevelopmentRun
   );
 }
 
-export function DevelopmentActivity({
-  events,
-  children,
-}: {
-  events: DevelopmentEvent[];
-  children?: ReactNode;
-}) {
+export function DevelopmentActivity({ events }: { events: DevelopmentEvent[] }) {
   const t = useTranslations('development');
   const locale = useLocale();
   const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
@@ -102,10 +96,7 @@ export function DevelopmentActivity({
   );
 
   return (
-    <section
-      aria-labelledby="agent-activity-title"
-      className="min-w-0 lg:h-[calc(100svh-9rem)] lg:min-h-[32rem]"
-    >
+    <section className="min-h-0 min-w-0 flex-1">
       <h1 id="agent-activity-title" className="sr-only">
         {t('conversation')}
       </h1>
@@ -124,14 +115,7 @@ export function DevelopmentActivity({
                   </MessageScrollerItem>
                 ))
               )}
-              {children === undefined || children === null ? null : (
-                <MessageScrollerItem messageId="interrupt" scrollAnchor>
-                  <Message>
-                    <MessageContent>{children}</MessageContent>
-                  </Message>
-                </MessageScrollerItem>
-              )}
-              <MessageScrollerItem messageId="lifecycle">
+              <MessageScrollerItem messageId="lifecycle" scrollAnchor>
                 <LifecycleHistory events={lifecycleEvents} dateTime={dateTime} />
               </MessageScrollerItem>
             </MessageScrollerContent>
