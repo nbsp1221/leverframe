@@ -1,7 +1,9 @@
 import {
   type ReviewListResponse,
+  type ReviewMetricsResponse,
   type StatusResponse,
   reviewListResponseSchema,
+  reviewMetricsResponseSchema,
   statusResponseSchema,
 } from '@repo/contracts';
 import { reviewEvaluationValues, reviewStatusValues } from './review-query';
@@ -18,7 +20,7 @@ export type ReviewDataResult<T> = { kind: 'ok'; data: T } | ReviewDataError;
 export type ReviewDataSource = {
   reviews: ReviewDataResult<ReviewListResponse>;
   status: ReviewDataResult<StatusResponse>;
-  completed: ReviewDataResult<ReviewListResponse>;
+  metrics: ReviewDataResult<ReviewMetricsResponse>;
   needsEvaluation: ReviewDataResult<ReviewListResponse>;
 };
 
@@ -85,6 +87,19 @@ async function fetchStatus(base: URL): Promise<ReviewDataResult<StatusResponse>>
   }
 }
 
+async function fetchMetrics(base: URL): Promise<ReviewDataResult<ReviewMetricsResponse>> {
+  try {
+    const response = await fetch(new URL('api/v1/reviews/metrics', base), { cache: 'no-store' });
+    if (!response.ok) {
+      return { kind: 'http-error', status: response.status };
+    }
+    const parsed = reviewMetricsResponseSchema.safeParse(await response.json());
+    return parsed.success ? { kind: 'ok', data: parsed.data } : { kind: 'schema-error' };
+  } catch {
+    return { kind: 'network-error' };
+  }
+}
+
 export async function getReviewData(search: URLSearchParams): Promise<ReviewDataSource> {
   const configuredBase = process.env.REVIEWER_INTERNAL_URL;
   if (!configuredBase) {
@@ -92,7 +107,7 @@ export async function getReviewData(search: URLSearchParams): Promise<ReviewData
     return {
       reviews: missingConfig,
       status: missingConfig,
-      completed: missingConfig,
+      metrics: missingConfig,
       needsEvaluation: missingConfig,
     };
   }
@@ -107,27 +122,21 @@ export async function getReviewData(search: URLSearchParams): Promise<ReviewData
     return {
       reviews: configError,
       status: configError,
-      completed: configError,
+      metrics: configError,
       needsEvaluation: configError,
     };
   }
   const currentQuery = toReviewerQuery(search);
-  const completedQuery = new URLSearchParams({
-    status: 'completed',
-    sort: 'completed',
-    page: '1',
-    page_size: '20',
-  });
   const needsEvaluationQuery = new URLSearchParams({
     evaluation: 'needs_evaluation',
     page: '1',
     page_size: '20',
   });
-  const [reviews, status, completed, needsEvaluation] = await Promise.all([
+  const [reviews, status, metrics, needsEvaluation] = await Promise.all([
     fetchReviews(base, currentQuery),
     fetchStatus(base),
-    fetchReviews(base, completedQuery),
+    fetchMetrics(base),
     fetchReviews(base, needsEvaluationQuery),
   ]);
-  return { reviews, status, completed, needsEvaluation };
+  return { reviews, status, metrics, needsEvaluation };
 }

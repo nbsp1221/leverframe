@@ -9,13 +9,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
 import { Badge } from '@repo/ui/components/badge';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@repo/ui/components/card';
-import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -140,76 +133,83 @@ export function ReviewExecutionTrace({ reviewId }: { reviewId: number }) {
 
   const visibleEvents = snapshot?.events.filter(visibleEvent) ?? [];
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle>{t('liveTrace')}</CardTitle>
-            <CardDescription>{t('liveTraceDescription')}</CardDescription>
-          </div>
-          <Badge variant="outline" aria-live="polite">
-            {connection === 'loading' || connection === 'reconnecting' ? (
-              <Spinner data-icon="inline-start" aria-hidden="true" />
-            ) : (
-              <ActivityIcon aria-hidden="true" />
-            )}
-            {t(`traceConnection_${connection}`)}
-          </Badge>
+    <section className="border-t border-border/70">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4 sm:px-6">
+        <div className="min-w-0">
+          <h3 className="text-base font-bold tracking-[-0.02em]">{t('liveTrace')}</h3>
+          <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">
+            {t('liveTraceDescription')}
+          </p>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+        <Badge variant="outline" className="shrink-0" aria-live="polite">
+          {connection === 'loading' || connection === 'reconnecting' ? (
+            <Spinner data-icon="inline-start" aria-hidden="true" />
+          ) : (
+            <ActivityIcon aria-hidden="true" />
+          )}
+          {t(`traceConnection_${connection}`)}
+        </Badge>
+      </div>
+
+      <div className="px-5 pb-5 sm:px-6">
         {snapshot === null ? (
-          <p className="text-sm text-muted-foreground">{t('traceLoading')}</p>
+          <p className="border-t border-border/70 py-4 text-sm text-muted-foreground">
+            {t('traceLoading')}
+          </p>
         ) : (
           <>
-            <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-              <TraceFact label={t('status')} value={t(snapshot.status)} />
-              <TraceFact label={t('attempt')} value={`#${snapshot.attempt}`} />
-              <TraceFact label={t('stage')} value={t(`traceStage_${snapshot.stage}`)} />
-              <TraceFact label={t('elapsed')} value={elapsed(snapshot.started_at, now) ?? '—'} />
-              <TraceFact
-                label={t('processHeartbeat')}
-                value={relative(snapshot.process_heartbeat_at, now, t)}
-              />
-              <TraceFact
+            <div className="flex flex-wrap gap-x-6 gap-y-2 border-y border-border/70 py-3 text-xs">
+              <TraceMeta label={t('stage')} value={t(`traceStage_${snapshot.stage}`)} />
+              <TraceMeta label={t('elapsed')} value={elapsed(snapshot.started_at, now) ?? '—'} />
+              <TraceMeta
                 label={t('lastCodexActivity')}
                 value={relative(snapshot.last_activity_at, now, t)}
               />
+              {snapshot.process_heartbeat_at ? (
+                <TraceMeta
+                  label={t('processHeartbeat')}
+                  value={relative(snapshot.process_heartbeat_at, now, t)}
+                />
+              ) : null}
             </div>
+
             {!snapshot.available ? (
-              <Alert>
+              <Alert className="mt-4">
                 <AlertTitle>{t('traceUnavailable')}</AlertTitle>
                 <AlertDescription>{t('traceUnavailableDescription')}</AlertDescription>
               </Alert>
             ) : null}
+
             {snapshot.current_command ? (
-              <section className="rounded-md border border-border bg-muted/40 p-4">
+              <section className="mt-4 rounded-xl bg-surface-subtle px-4 py-3">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <Spinner aria-hidden="true" />
                   {t('currentCommand')}
                 </div>
-                <code className="mt-2 block break-all text-xs leading-5">
+                <code className="mt-1.5 block break-all text-xs leading-5">
                   {snapshot.current_command.command}
                 </code>
-                <p className="mt-2 text-xs text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {t('runningFor')} {elapsed(snapshot.current_command.started_at, now) ?? '—'}
                 </p>
               </section>
             ) : null}
+
             {snapshot.trace_truncated ? (
-              <Alert>
+              <Alert className="mt-4">
                 <AlertTitle>{t('traceTruncated')}</AlertTitle>
                 <AlertDescription>{t('traceTruncatedDescription')}</AlertDescription>
               </Alert>
             ) : null}
-            <section>
-              <h3 className="text-sm font-medium">{t('activityTimeline')}</h3>
+
+            <section className="mt-5">
+              <h4 className="text-sm font-semibold">{t('activityTimeline')}</h4>
               {visibleEvents.length === 0 ? (
-                <p className="mt-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                <p className="mt-2 border-y border-border/70 py-4 text-sm text-muted-foreground">
                   {t('noTraceActivity')}
                 </p>
               ) : (
-                <ol className="mt-3 space-y-3">
+                <ol className="mt-2 divide-y divide-border/70 border-y border-border/70">
                   {visibleEvents.map((event) => (
                     <TraceEvent key={event.sequence} event={event} t={t} />
                   ))}
@@ -218,45 +218,49 @@ export function ReviewExecutionTrace({ reviewId }: { reviewId: number }) {
             </section>
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
-function TraceFact({ label, value }: { label: string; value: string }) {
+function TraceMeta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 font-medium">{value}</p>
-    </div>
+    <span className="inline-flex min-w-0 items-baseline gap-1.5">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold text-foreground">{value}</span>
+    </span>
   );
 }
 
 function TraceEvent({ event, t }: { event: ReviewExecutionEvent; t: Translator }) {
   const title = eventTitle(event, t);
   return (
-    <li className="rounded-md border border-border p-3 text-sm">
+    <li className="py-3 text-sm">
       <div className="flex min-w-0 items-start gap-3">
-        <TerminalIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+          <TerminalIcon aria-hidden="true" className="size-3.5" />
+        </span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <p className="break-words font-medium">{title}</p>
-              <Badge variant="outline">#{event.attempt}</Badge>
+              <span className="text-xs text-muted-foreground">#{event.attempt}</span>
             </div>
-            <time className="text-xs text-muted-foreground">{formatTime(event.observed_at)}</time>
+            <time className="shrink-0 text-xs text-muted-foreground">
+              {formatTime(event.observed_at)}
+            </time>
           </div>
           {event.command ? (
-            <code className="mt-2 block break-all text-xs leading-5">{event.command}</code>
+            <code className="mt-1.5 block break-all text-xs leading-5">{event.command}</code>
           ) : null}
           {event.message ? (
-            <p className="mt-2 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+            <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-5 text-muted-foreground">
               {event.message}
             </p>
           ) : null}
           {event.output !== null ? (
-            <Collapsible className="mt-3">
-              <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-xs hover:bg-muted">
+            <Collapsible className="mt-2">
+              <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-surface-subtle px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-muted">
                 <span>
                   {t('commandOutput')}
                   {event.output_truncated ? ` · ${t('outputTruncated')}` : ''}
@@ -264,7 +268,7 @@ function TraceEvent({ event, t }: { event: ReviewExecutionEvent; t: Translator }
                 <ChevronDownIcon aria-hidden="true" className="size-4" />
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
+                <pre className="mt-2 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-xs leading-5">
                   {event.output || t('emptyOutput')}
                 </pre>
               </CollapsibleContent>
