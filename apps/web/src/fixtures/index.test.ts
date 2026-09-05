@@ -92,6 +92,23 @@ describe('fixture harness', () => {
     }
   });
 
+  it('creates a many-finding stress fixture with a mixed severity distribution', () => {
+    const detail = fixtureDetailResponse(createFixture('stress-many-findings'), 241);
+    expect(detail?.artifact.findings).toHaveLength(10);
+    expect(detail?.artifact.findings.map((finding) => finding.severity)).toEqual([
+      'high',
+      'medium',
+      'medium',
+      'medium',
+      'low',
+      'low',
+      'low',
+      'low',
+      'low',
+      'low',
+    ]);
+  });
+
   it('keeps finding lifecycle states in the stored detail contract', () => {
     expect(
       fixtureDetailResponse(createFixture('finding-open'), 229)?.artifact.findings[0]?.state,
