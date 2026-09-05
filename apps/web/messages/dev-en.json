@@ -1,6 +1,7 @@
 {
   "reviews": {
     "fixture": "Fixture scenario",
+    "fixtureApply": "Apply",
     "fixtureNotice": "Development fixture: this control is hidden in production.",
     "scenario": "Scenario"
   }

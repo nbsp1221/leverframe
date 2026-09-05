@@ -1,6 +1,7 @@
 {
   "reviews": {
     "fixture": "픽스처 시나리오",
+    "fixtureApply": "적용",
     "fixtureNotice": "개발용 픽스처입니다. 운영에서는 이 컨트롤이 숨겨집니다.",
     "scenario": "시나리오"
   }

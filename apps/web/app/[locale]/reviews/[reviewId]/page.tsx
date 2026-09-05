@@ -47,11 +47,8 @@ export default async function ReviewDetailRoute({
       <ReviewDetailErrorState kind={result.kind} reviewId={reviewId} returnQuery={returnQuery} />
     );
   }
+  const evaluationData = evaluations.kind === 'ok' ? evaluations.data : null;
   return (
-    <ReviewDetailPage
-      detail={result.data}
-      returnQuery={returnQuery}
-      evaluations={evaluations.kind === 'ok' ? evaluations.data : null}
-    />
+    <ReviewDetailPage detail={result.data} returnQuery={returnQuery} evaluations={evaluationData} />
   );
 }
