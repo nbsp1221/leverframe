@@ -43,6 +43,17 @@ export interface ReviewListQuery {
   evaluation?: 'evaluated' | 'needs_evaluation';
 }
 
+export interface ReviewMetrics {
+  terminalWindowSize: number;
+  terminalSampleSize: number;
+  completedSampleSize: number;
+  failedSampleSize: number;
+  durationSampleSize: number;
+  averageDurationMs?: number;
+  medianDurationMs?: number;
+  failureRate?: number;
+}
+
 export class ReviewRepository {
   constructor(
     private readonly database: DatabaseSync,
@@ -239,6 +250,42 @@ export class ReviewRepository {
     return { totalItems: Number(count.count), items: rows };
   }
 
+  getReviewMetrics(terminalWindowSize = 50): ReviewMetrics {
+    const limit = Math.max(1, Math.floor(terminalWindowSize));
+    const rows = this.database
+      .prepare(`
+        SELECT state, review_started_at, review_completed_at
+        FROM review_jobs
+        WHERE state IN ('DONE', 'FAILED', 'TIMED_OUT')
+        ORDER BY id DESC
+        LIMIT ?
+      `)
+      .all(limit) as Array<Record<string, unknown>>;
+
+    const completed = rows.filter((row) => row.state === 'DONE');
+    const failed = rows.length - completed.length;
+    const durations = completed
+      .map((row) => reviewDurationMilliseconds(row.review_started_at, row.review_completed_at))
+      .filter((value): value is number => value !== undefined)
+      .sort((a, b) => a - b);
+    const averageDurationMs =
+      durations.length === 0
+        ? undefined
+        : durations.reduce((sum, duration) => sum + duration, 0) / durations.length;
+    const medianDurationMs = median(durations);
+
+    return {
+      terminalWindowSize: limit,
+      terminalSampleSize: rows.length,
+      completedSampleSize: completed.length,
+      failedSampleSize: failed,
+      durationSampleSize: durations.length,
+      ...(averageDurationMs === undefined ? {} : { averageDurationMs }),
+      ...(medianDurationMs === undefined ? {} : { medianDurationMs }),
+      ...(rows.length === 0 ? {} : { failureRate: failed / rows.length }),
+    };
+  }
+
   getReviewJobRow(id: number): Record<string, unknown> | undefined {
     return this.database.prepare('SELECT * FROM review_jobs WHERE id=?').get(id);
   }
@@ -419,6 +466,25 @@ function canonicalPath(path: string, requireExists = true): string {
 function isWithin(root: string, candidate: string): boolean {
   const relativePath = relative(root, candidate);
   return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`));
+}
+
+function reviewDurationMilliseconds(start: unknown, end: unknown): number | undefined {
+  if (typeof start !== 'string' || typeof end !== 'string') {
+    return undefined;
+  }
+  const value = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function median(values: readonly number[]): number | undefined {
+  if (values.length === 0) {
+    return undefined;
+  }
+  const middle = Math.floor(values.length / 2);
+  if (values.length % 2 === 1) {
+    return values[middle];
+  }
+  return (values[middle - 1]! + values[middle]!) / 2;
 }
 
 function hashContent(content: string): string {
