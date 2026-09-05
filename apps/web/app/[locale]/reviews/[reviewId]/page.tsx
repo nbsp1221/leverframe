@@ -21,6 +21,16 @@ export default async function ReviewDetailRoute({
     return <ReviewDetailNotFoundState returnQuery={returnQuery} />;
   }
   const fixture = typeof query.fixture === 'string' ? query.fixture : undefined;
+  const prototype =
+    process.env.NODE_ENV === 'development' &&
+    (query.prototype === 'single' || query.prototype === 'rail')
+      ? query.prototype
+      : undefined;
+  const concept =
+    process.env.NODE_ENV === 'development' &&
+    (query.concept === 'toss-first' || query.concept === 'desktop')
+      ? query.concept
+      : undefined;
   const useFixture =
     process.env.NODE_ENV === 'development' &&
     (fixture !== undefined || process.env.REVIEWER_INTERNAL_URL === undefined);
@@ -48,6 +58,30 @@ export default async function ReviewDetailRoute({
     );
   }
   const evaluationData = evaluations.kind === 'ok' ? evaluations.data : null;
+  if (concept && result.data.status === 'completed' && result.data.artifact.available) {
+    const { ReviewDetailConcept } =
+      await import('../../../../src/features/reviews/review-detail-concepts');
+    return (
+      <ReviewDetailConcept
+        detail={result.data}
+        evaluations={evaluationData}
+        concept={concept}
+        returnQuery={returnQuery}
+      />
+    );
+  }
+  if (prototype) {
+    const { ReviewDetailPrototype } =
+      await import('../../../../src/features/reviews/review-detail-prototype');
+    return (
+      <ReviewDetailPrototype
+        detail={result.data}
+        evaluations={evaluationData}
+        layout={prototype}
+        returnQuery={returnQuery}
+      />
+    );
+  }
   return (
     <ReviewDetailPage detail={result.data} returnQuery={returnQuery} evaluations={evaluationData} />
   );
