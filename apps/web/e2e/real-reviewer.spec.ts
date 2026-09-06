@@ -58,34 +58,32 @@ test('browser evaluation writes use the real reviewer contracts', async ({
 
   await page.goto('/en/reviews/1');
   await expect(page.getByRole('heading', { name: 'Real E2E review' })).toBeVisible();
-  const reviewEvaluation = page.getByRole('complementary');
+  const reviewEvaluation = page.getByRole('complementary', { name: 'Review evaluation' });
   await expect(
-    reviewEvaluation.getByRole('button', { name: 'Useful', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
-  await expect(reviewEvaluation.getByRole('textbox', { name: 'Rationale' })).toHaveValue(
-    'human-approved external review evaluation',
-  );
-  const rationale = page.getByRole('textbox', { name: 'Rationale' }).first();
+    reviewEvaluation.getByRole('radio', { name: 'Helpful', exact: true }),
+  ).toHaveAttribute('aria-checked', 'true');
+  const rationale = reviewEvaluation.getByRole('textbox', { name: 'Rationale' });
+  await expect(rationale).toHaveValue('human-approved external review evaluation');
   await rationale.fill('real reviewer write');
-  await page.getByRole('button', { name: 'Save evaluation' }).first().click();
-  await expect(page.getByRole('status')).toContainText('Evaluation saved');
-  await page.getByRole('button', { name: 'Mixed' }).first().click();
-  await page.getByRole('button', { name: 'Save evaluation' }).first().click();
-  await expect(page.getByRole('status')).toContainText('Evaluation saved');
+  await reviewEvaluation.getByRole('button', { name: 'Save evaluation' }).click();
+  await expect(reviewEvaluation.getByRole('status')).toContainText('Evaluation saved');
+  await reviewEvaluation.getByRole('radio', { name: 'Could be better', exact: true }).click();
+  await reviewEvaluation.getByRole('button', { name: 'Save evaluation' }).click();
+  await expect(reviewEvaluation.getByRole('status')).toContainText('Evaluation saved');
 
-  const evidence = page.getByRole('button', { name: 'Evidence and suggested action' }).first();
-  await evidence.click();
   const finding = page.locator('article').first();
-  await expect(
-    finding.getByRole('button', { name: 'False positive', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  await finding.getByRole('button', { name: /Edit evaluation/ }).click();
+  await expect(finding.getByRole('radio', { name: 'False positive', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
   await expect(finding.getByRole('textbox', { name: 'Rationale' })).toHaveValue(
     'human-approved external finding evaluation',
   );
-  await finding.getByRole('button', { name: 'Valid', exact: true }).click();
+  await finding.getByRole('radio', { name: 'This is valid', exact: true }).click();
   await finding.getByRole('button', { name: 'Save evaluation' }).click();
   await expect(finding.getByRole('status')).toContainText('Evaluation saved');
-  await finding.getByRole('button', { name: 'Partially valid', exact: true }).click();
+  await finding.getByRole('radio', { name: 'Partly valid', exact: true }).click();
   await finding.getByRole('button', { name: 'Save evaluation' }).click();
   await expect(finding.getByRole('status')).toContainText('Evaluation saved');
   await finding.getByRole('button', { name: 'View history' }).click();
@@ -112,27 +110,25 @@ test('browser evaluation writes use the real reviewer contracts', async ({
     3,
   );
 
-  await page.getByRole('complementary').getByRole('button', { name: 'Withdraw' }).click();
-  await expect(
-    page.getByRole('complementary').getByText('Evaluation withdrawn.', { exact: true }),
-  ).toBeVisible();
+  await reviewEvaluation.getByRole('button', { name: 'Withdraw' }).click();
+  await expect(reviewEvaluation.getByText('Evaluation withdrawn.', { exact: true })).toBeVisible();
   const evaluationsAfterWithdraw = await request.get(`${reviewerUrl}/api/v1/reviews/1/evaluations`);
   expect(
     ((await evaluationsAfterWithdraw.json()) as typeof evaluationData).review.current,
   ).toBeNull();
 
   await page.reload();
-  const reloadedReviewEvaluation = page.getByRole('complementary');
-  await reloadedReviewEvaluation.getByRole('button', { name: 'Useful', exact: true }).click();
+  const reloadedReviewEvaluation = page.getByRole('complementary', { name: 'Review evaluation' });
+  await reloadedReviewEvaluation.getByRole('radio', { name: 'Helpful', exact: true }).click();
   await reloadedReviewEvaluation
     .getByRole('textbox', { name: 'Rationale' })
     .fill('saved after withdrawal');
   await reloadedReviewEvaluation.getByRole('button', { name: 'Save evaluation' }).click();
   await expect(reloadedReviewEvaluation.getByRole('status')).toContainText('Evaluation saved');
 
-  await page.getByRole('button', { name: 'Evidence and suggested action' }).first().click();
   const reloadedFinding = page.locator('article').first();
-  await reloadedFinding.getByRole('button', { name: 'Valid', exact: true }).click();
+  await reloadedFinding.getByRole('button', { name: 'Evaluate', exact: true }).click();
+  await reloadedFinding.getByRole('radio', { name: 'This is valid', exact: true }).click();
   await reloadedFinding.getByRole('button', { name: 'Save evaluation' }).click();
   await expect(reloadedFinding.getByRole('status')).toContainText('Evaluation saved');
 
@@ -156,9 +152,9 @@ test('browser preserves a human draft when an external client wins the revision 
   }
   await forwardApi(page);
   await page.goto('/en/reviews/1');
-  const reviewEvaluation = page.getByRole('complementary');
+  const reviewEvaluation = page.getByRole('complementary', { name: 'Review evaluation' });
+  await reviewEvaluation.getByRole('radio', { name: 'Could be better', exact: true }).click();
   const rationale = reviewEvaluation.getByRole('textbox', { name: 'Rationale' });
-  await reviewEvaluation.getByRole('button', { name: 'Mixed', exact: true }).click();
   await rationale.fill('human draft must survive a stale write');
 
   const externalWrite = await request.put(`${reviewerUrl}/api/v1/reviews/1/evaluation`, {
@@ -174,8 +170,8 @@ test('browser preserves a human draft when an external client wins the revision 
   await expect(reviewEvaluation.getByText('This evaluation changed elsewhere.')).toBeVisible();
   await expect(rationale).toHaveValue('human draft must survive a stale write');
   await expect(
-    reviewEvaluation.getByRole('button', { name: 'Mixed', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
+    reviewEvaluation.getByRole('radio', { name: 'Could be better', exact: true }),
+  ).toHaveAttribute('aria-checked', 'true');
   const after = (await (
     await request.get(`${reviewerUrl}/api/v1/reviews/1/evaluations`)
   ).json()) as { review: { current: { verdict: string; rationale: string } | null } };
@@ -191,10 +187,11 @@ test('browser preserves drafts on a 500 response', async ({ page }, testInfo) =>
   await page.route('**/api/v1/reviews/241/evaluation', (route) =>
     route.fulfill({ status: 500, body: JSON.stringify({ error: 'fixture failure' }) }),
   );
-  const rationale = page.getByRole('textbox', { name: 'Rationale' }).first();
-  await page.getByRole('button', { name: 'Useful' }).first().click();
+  const reviewEvaluation = page.getByRole('complementary', { name: 'Review evaluation' });
+  await reviewEvaluation.getByRole('radio', { name: 'Helpful', exact: true }).click();
+  const rationale = reviewEvaluation.getByRole('textbox', { name: 'Rationale' });
   await rationale.fill('draft survives 500');
-  await page.getByRole('button', { name: 'Save evaluation' }).first().click();
-  await expect(page.getByText('Evaluation could not be saved')).toBeVisible();
+  await reviewEvaluation.getByRole('button', { name: 'Save evaluation' }).click();
+  await expect(reviewEvaluation.getByText('Evaluation could not be saved')).toBeVisible();
   await expect(rationale).toHaveValue('draft survives 500');
 });

@@ -17,6 +17,7 @@ import {
   reviewIdParamsSchema,
   reviewListQuerySchema,
   reviewListResponseSchema,
+  reviewMetricsResponseSchema,
   statusResponseSchema,
 } from '@repo/contracts';
 import type { JobDatabase } from '../../jobs/database.js';
@@ -89,6 +90,19 @@ const listReviewsRoute = createRoute({
   responses: {
     200: jsonResponse(reviewListResponseSchema, 'A page of review runs.'),
     422: invalidRequestResponse,
+  },
+});
+
+const reviewMetricsRoute = createRoute({
+  method: 'get',
+  path: '/api/v1/reviews/metrics',
+  operationId: 'getReviewMetrics',
+  tags: ['Reviews'],
+  summary: 'Get recent review execution metrics',
+  description:
+    'Returns bounded operational metrics over the 50 most recent terminal review runs. Failure rate includes FAILED and TIMED_OUT runs and excludes CANCELLED and SUPERSEDED runs. Duration statistics use successful DONE runs with complete review timing.',
+  responses: {
+    200: jsonResponse(reviewMetricsResponseSchema, 'Recent review execution metrics.'),
   },
 });
 
@@ -353,6 +367,22 @@ export function registerReviewRoutes(
         completed_at: item.completedAt ?? null,
         duration_ms: item.durationMs ?? null,
       })),
+    });
+    recordRead();
+    return c.json(response, 200);
+  });
+
+  app.openapi(reviewMetricsRoute, (c) => {
+    const metrics = database.getReviewMetrics(50);
+    const response = reviewMetricsResponseSchema.parse({
+      terminal_window_size: metrics.terminalWindowSize,
+      terminal_sample_size: metrics.terminalSampleSize,
+      completed_sample_size: metrics.completedSampleSize,
+      failed_sample_size: metrics.failedSampleSize,
+      duration_sample_size: metrics.durationSampleSize,
+      average_duration_ms: metrics.averageDurationMs ?? null,
+      median_duration_ms: metrics.medianDurationMs ?? null,
+      failure_rate: metrics.failureRate ?? null,
     });
     recordRead();
     return c.json(response, 200);

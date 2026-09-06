@@ -10,6 +10,7 @@ import {
   reviewDetailSchema,
   reviewExecutionSnapshotSchema,
   reviewListResponseSchema,
+  reviewMetricsResponseSchema,
   statusResponseSchema,
 } from '@repo/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -129,6 +130,23 @@ describe('versioned reviewer API contracts', () => {
     expect(parsed.overall).toBe('unknown');
     expect(parsed.worker.status).toBe('unknown');
     expect(parsed.sandbox.status).toBe('unknown');
+  });
+
+  it('reports bounded review execution metrics with explicit sample sizes', async () => {
+    const { url } = await fixture();
+    const response = await fetch(`${url}/api/v1/reviews/metrics`);
+    expect(response.status).toBe(200);
+    const metrics = reviewMetricsResponseSchema.parse(await response.json());
+    expect(metrics).toEqual({
+      terminal_window_size: 50,
+      terminal_sample_size: 1,
+      completed_sample_size: 1,
+      failed_sample_size: 0,
+      duration_sample_size: 0,
+      average_duration_ms: null,
+      median_duration_ms: null,
+      failure_rate: 0,
+    });
   });
 
   it('exposes a pull request title in list and detail responses before claiming the job', async () => {

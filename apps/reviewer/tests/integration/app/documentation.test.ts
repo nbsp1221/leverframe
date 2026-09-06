@@ -100,6 +100,7 @@ describe('agent-readable API documentation', () => {
       expect.arrayContaining([
         'getLeverframeStatus',
         'listReviews',
+        'getReviewMetrics',
         'getReview',
         'getReviewEvaluations',
         'setReviewEvaluation',
@@ -111,12 +112,13 @@ describe('agent-readable API documentation', () => {
         'streamReviewExecution',
       ]),
     );
-    expect(operationIds).toHaveLength(11);
+    expect(operationIds).toHaveLength(12);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
       ['get', '/api/v1/status', 'getLeverframeStatus', ['200']],
       ['get', '/api/v1/reviews', 'listReviews', ['200', '422']],
+      ['get', '/api/v1/reviews/metrics', 'getReviewMetrics', ['200']],
       ['get', '/api/v1/reviews/{reviewId}', 'getReview', ['200', '404', '422']],
       [
         'get',

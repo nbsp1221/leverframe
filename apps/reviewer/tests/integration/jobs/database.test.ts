@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { JobDatabase } from '../../../src/jobs/database.js';
 import { type ReviewResult, findingFingerprint } from '../../../src/review/result.js';
 
@@ -111,6 +111,57 @@ describe('JobDatabase', () => {
     expect(database.claimNextJob()).toBeUndefined();
     expect(database.countJobs()).toBe(3);
     database.close();
+  });
+
+  it('summarizes recent terminal review duration and failure rate with explicit samples', () => {
+    vi.useFakeTimers();
+    const database = new JobDatabase(':memory:');
+    try {
+      const addJob = (number: number, deliveryId: string) => {
+        database.enqueuePullRequest({
+          ...baseJob,
+          deliveryId,
+          headSha: number.toString().padStart(40, '0'),
+          pullRequestNumber: number,
+        });
+        const job = database.claimNextJob();
+        if (job === undefined) {
+          throw new Error('expected review metrics fixture job');
+        }
+        return job;
+      };
+
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const fast = addJob(10, 'metrics-fast');
+      database.updateJob({ id: fast.id, state: 'REVIEWING', expectedStates: ['CHECKING_OUT'] });
+      vi.setSystemTime(new Date('2026-01-01T00:01:00.000Z'));
+      database.updateJob({ id: fast.id, state: 'VALIDATING', expectedStates: ['REVIEWING'] });
+      database.updateJob({ id: fast.id, state: 'DONE', expectedStates: ['VALIDATING'] });
+
+      vi.setSystemTime(new Date('2026-01-01T00:02:00.000Z'));
+      const slow = addJob(11, 'metrics-slow');
+      database.updateJob({ id: slow.id, state: 'REVIEWING', expectedStates: ['CHECKING_OUT'] });
+      vi.setSystemTime(new Date('2026-01-01T00:05:00.000Z'));
+      database.updateJob({ id: slow.id, state: 'VALIDATING', expectedStates: ['REVIEWING'] });
+      database.updateJob({ id: slow.id, state: 'DONE', expectedStates: ['VALIDATING'] });
+
+      const failed = addJob(12, 'metrics-failed');
+      database.updateJob({ id: failed.id, state: 'FAILED', expectedStates: ['CHECKING_OUT'] });
+
+      expect(database.getReviewMetrics()).toEqual({
+        terminalWindowSize: 50,
+        terminalSampleSize: 3,
+        completedSampleSize: 2,
+        failedSampleSize: 1,
+        durationSampleSize: 2,
+        averageDurationMs: 120_000,
+        medianDurationMs: 120_000,
+        failureRate: 1 / 3,
+      });
+    } finally {
+      database.close();
+      vi.useRealTimers();
+    }
   });
 
   it('cancels queued work once per lifecycle delivery and can revive the same head', () => {

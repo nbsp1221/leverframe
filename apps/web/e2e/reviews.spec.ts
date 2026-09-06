@@ -29,10 +29,285 @@ test.describe('review shell fixtures', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('2');
     await page.getByRole('link', { name: 'Back to reviews' }).click();
     await expect(page).toHaveURL(/\/en\/reviews/);
-    await expect(page.getByRole('heading', { name: 'Code reviews' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Reviews' })).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('fixture')).toBe('pagination');
     await expect.poll(() => new URL(page.url()).searchParams.get('status')).toBe('completed');
     await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('2');
+  });
+
+  test('keeps fixture switching and inbox filters interactive', async ({ page }) => {
+    await page.goto('/en/reviews?fixture=default');
+
+    await page.getByRole('combobox', { name: 'Fixture scenario' }).selectOption('degraded');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('fixture')).toBe('degraded');
+    await expect(page.getByText('A dependency needs attention.').first()).toBeVisible();
+
+    await page.goto('/en/reviews?fixture=default');
+    const filters = page.getByRole('button', { name: 'Filters', exact: true });
+    await expect(filters).toHaveAttribute('aria-expanded', 'false');
+    await filters.click();
+    await expect(filters).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('combobox', { name: 'Filter by status' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Filter by evaluation' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Needs evaluation', exact: true }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('evaluation'))
+      .toBe('needs_evaluation');
+  });
+
+  test('completed review prioritizes result and human judgment before diagnostics', async ({
+    page,
+  }) => {
+    await page.goto('/en/reviews/241?fixture=completed-multiple-findings');
+
+    await expect(page.getByText('At a glance', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('The reviewer completed the persisted fixture summary.', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What to review' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Evaluate', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('radio', { name: 'This is valid', exact: true })).toHaveCount(0);
+
+    const evidence = page.getByRole('button', { name: 'View evidence' }).first();
+    await expect(evidence).toHaveAttribute('aria-expanded', 'false');
+
+    const diagnostics = page.getByRole('button', { name: 'Execution details' });
+    await expect(diagnostics).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByText('Prompt version', { exact: true })).toBeHidden();
+
+    await diagnostics.click();
+    await expect(diagnostics).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByText('Prompt version', { exact: true })).toBeVisible();
+    await expect(page.getByText('Base SHA', { exact: true })).toBeHidden();
+    const provenance = page.getByRole('button', { name: 'Provenance', exact: true });
+    await expect(provenance).toHaveAttribute('aria-expanded', 'false');
+    await provenance.click();
+    await expect(page.getByText('Base SHA', { exact: true })).toBeVisible();
+    await expect(page.getByText('Execution trace', { exact: true })).toBeVisible();
+  });
+
+  test('clean completed review hides an empty findings section', async ({ page }) => {
+    await page.goto('/en/reviews/235?fixture=completed-zero-findings');
+    await expect(page.getByText('At a glance', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What to review' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Files and tests' })).toBeVisible();
+  });
+
+  test('expanded finding surfaces stay in the reading flow', async ({ page }) => {
+    await page.goto('/en/reviews/241?fixture=completed-multiple-findings');
+    const finding = page.locator('article').first();
+    const evidence = finding.getByRole('button', { name: 'View evidence' });
+    const evaluate = finding.getByRole('button', { name: 'Evaluate', exact: true });
+
+    await evidence.click();
+    await expect(
+      finding.getByText('Evidence excerpt for finding 1.', { exact: true }),
+    ).toBeVisible();
+    let evidenceBox = await evidence.boundingBox();
+    let evaluateBox = await evaluate.boundingBox();
+    if (!evidenceBox || !evaluateBox) {
+      throw new Error('finding actions must be measurable');
+    }
+    expect(Math.abs(evidenceBox.y - evaluateBox.y)).toBeLessThan(8);
+
+    await evaluate.click();
+    await expect(finding.getByRole('radio', { name: 'This is valid', exact: true })).toBeVisible();
+    evidenceBox = await evidence.boundingBox();
+    evaluateBox = await evaluate.boundingBox();
+    if (!evidenceBox || !evaluateBox) {
+      throw new Error('expanded finding actions must be measurable');
+    }
+    expect(Math.abs(evidenceBox.y - evaluateBox.y)).toBeLessThan(8);
+  });
+
+  test('live activity preserves retained events across state-only snapshots', async ({ page }) => {
+    const retainedEvent = {
+      schema_version: 1,
+      sequence: 1,
+      attempt: 1,
+      observed_at: '2026-08-24T00:00:01.000Z',
+      type: 'agent_message',
+      item_id: null,
+      command: null,
+      status: null,
+      exit_code: null,
+      duration_ms: null,
+      output: null,
+      output_truncated: false,
+      message: 'Retained activity from the initial snapshot',
+      notice_code: null,
+    };
+    const runningSnapshot = {
+      review_id: 240,
+      available: true,
+      unavailable_reason: null,
+      attempt: 1,
+      status: 'running',
+      stage: 'reviewing',
+      started_at: '2026-08-24T00:00:00.000Z',
+      process_heartbeat_at: null,
+      last_activity_at: retainedEvent.observed_at,
+      last_sequence: 1,
+      trace_truncated: false,
+      current_command: null,
+      events: [retainedEvent],
+    };
+    await page.route('**/api/v1/reviews/240/execution', (route) =>
+      route.fulfill({ json: runningSnapshot }),
+    );
+    await page.route('**/api/v1/reviews/240/execution/events?after=1', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        body: `event: snapshot\ndata: ${JSON.stringify({ ...runningSnapshot, events: [] })}\n\n`,
+      }),
+    );
+
+    await page.goto('/en/reviews/240?fixture=running');
+
+    await expect(
+      page.getByText('Retained activity from the initial snapshot', { exact: true }),
+    ).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(
+      page.getByText('Retained activity from the initial snapshot', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText('No activity to show yet.', { exact: true })).toHaveCount(0);
+  });
+
+  test('live activity refreshes the server detail after a terminal snapshot', async ({ page }) => {
+    const runningSnapshot = {
+      review_id: 240,
+      available: true,
+      unavailable_reason: null,
+      attempt: 1,
+      status: 'running',
+      stage: 'reviewing',
+      started_at: '2026-08-24T00:00:00.000Z',
+      process_heartbeat_at: null,
+      last_activity_at: null,
+      last_sequence: 0,
+      trace_truncated: false,
+      current_command: null,
+      events: [],
+    };
+    const rscRequests: string[] = [];
+    let releaseTerminalSnapshot: (() => void) | undefined;
+    const waitForRelease = new Promise<void>((resolve) => {
+      releaseTerminalSnapshot = resolve;
+    });
+    page.on('request', (request) => {
+      if (request.headers().rsc === '1') {
+        rscRequests.push(request.url());
+      }
+    });
+    await page.route('**/api/v1/reviews/240/execution', (route) =>
+      route.fulfill({ json: runningSnapshot }),
+    );
+    await page.route('**/api/v1/reviews/240/execution/events?after=0', async (route) => {
+      await waitForRelease;
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        body: `event: snapshot\ndata: ${JSON.stringify({
+          ...runningSnapshot,
+          status: 'completed',
+          stage: 'done',
+        })}\n\n`,
+      });
+    });
+
+    await page.goto('/en/reviews/240?fixture=running');
+    await expect(page.getByRole('heading', { name: 'Live activity' })).toBeVisible();
+    const before = rscRequests.length;
+    releaseTerminalSnapshot?.();
+    await expect.poll(() => rscRequests.length).toBeGreaterThan(before);
+  });
+
+  test('queued review refreshes when execution begins', async ({ page }) => {
+    const queuedSnapshot = {
+      review_id: 232,
+      available: false,
+      unavailable_reason: 'not started',
+      attempt: 0,
+      status: 'queued',
+      stage: 'queued',
+      started_at: null,
+      process_heartbeat_at: null,
+      last_activity_at: null,
+      last_sequence: 0,
+      trace_truncated: false,
+      current_command: null,
+      events: [],
+    };
+    const rscRequests: string[] = [];
+    let releaseRunningSnapshot: (() => void) | undefined;
+    const waitForRelease = new Promise<void>((resolve) => {
+      releaseRunningSnapshot = resolve;
+    });
+    page.on('request', (request) => {
+      if (request.headers().rsc === '1') {
+        rscRequests.push(request.url());
+      }
+    });
+    await page.route('**/api/v1/reviews/232/execution', (route) =>
+      route.fulfill({ json: queuedSnapshot }),
+    );
+    await page.route('**/api/v1/reviews/232/execution/events?after=0', async (route) => {
+      await waitForRelease;
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        body: `event: snapshot\ndata: ${JSON.stringify({
+          ...queuedSnapshot,
+          available: true,
+          unavailable_reason: null,
+          attempt: 1,
+          status: 'running',
+          stage: 'checking_out',
+          started_at: '2026-08-24T00:00:00.000Z',
+        })}\n\n`,
+      });
+    });
+
+    await page.goto('/en/reviews/232?fixture=queued');
+    const before = rscRequests.length;
+    releaseRunningSnapshot?.();
+    await expect.poll(() => rscRequests.length).toBeGreaterThan(before);
+  });
+
+  test('terminal review without a trace does not look like it is still loading', async ({
+    page,
+  }) => {
+    await page.route('**/api/v1/reviews/231/execution', async (route) => {
+      await route.fulfill({
+        json: {
+          review_id: 231,
+          available: false,
+          unavailable_reason: 'trace unavailable',
+          attempt: 1,
+          status: 'cancelled',
+          stage: 'cancelled',
+          started_at: null,
+          process_heartbeat_at: null,
+          last_activity_at: null,
+          last_sequence: 0,
+          trace_truncated: false,
+          current_command: null,
+          events: [],
+        },
+      });
+    });
+
+    await page.goto('/en/reviews/231?fixture=cancelled');
+
+    await expect(page.getByText('Run ended', { exact: true })).toBeVisible();
+    await expect(page.getByText('Loading activity', { exact: true })).toHaveCount(0);
+    await expect(
+      page.getByText('This run did not capture a trace or has not started yet.', { exact: true }),
+    ).toBeVisible();
   });
 
   test('persists theme and switches locale while retaining fixture query', async ({ page }) => {
@@ -88,18 +363,19 @@ test.describe('review shell fixtures', () => {
         await route.fulfill({ json: { revision, current: null } });
       }
     });
-    await page.getByRole('button', { name: 'Useful' }).first().click();
-    await page.getByRole('textbox', { name: 'Rationale' }).fill('browser rationale');
-    await page.getByRole('button', { name: 'Save evaluation' }).first().click();
-    await expect(page.getByRole('status')).toContainText('Evaluation saved');
-    await page.getByRole('button', { name: 'Mixed' }).first().click();
-    await page.getByRole('button', { name: 'Save evaluation' }).first().click();
-    await expect(page.getByRole('status')).toContainText('Evaluation saved');
-    await page.getByRole('button', { name: 'Withdraw' }).first().click();
-    await expect(page.getByRole('status')).toContainText('Evaluation withdrawn');
+    const reviewEvaluation = page.getByRole('complementary', { name: 'Review evaluation' });
+    await reviewEvaluation.getByRole('radio', { name: 'Helpful', exact: true }).click();
+    await reviewEvaluation.getByRole('textbox', { name: 'Rationale' }).fill('browser rationale');
+    await reviewEvaluation.getByRole('button', { name: 'Save evaluation' }).click();
+    await expect(reviewEvaluation.getByRole('status')).toContainText('Evaluation saved');
+    await reviewEvaluation.getByRole('radio', { name: 'Could be better', exact: true }).click();
+    await reviewEvaluation.getByRole('button', { name: 'Save evaluation' }).click();
+    await expect(reviewEvaluation.getByRole('status')).toContainText('Evaluation saved');
+    await reviewEvaluation.getByRole('button', { name: 'Withdraw' }).click();
+    await expect(reviewEvaluation.getByRole('status')).toContainText('Evaluation withdrawn');
     expect(previousIds).toEqual([2, 3, 4]);
-    await page.getByRole('button', { name: 'View history' }).first().click();
-    await expect(page.getByText('Withdraw').last()).toBeVisible();
+    await reviewEvaluation.getByRole('button', { name: 'View history' }).click();
+    await expect(reviewEvaluation.getByText('Withdraw').last()).toBeVisible();
   });
 
   test('retains a draft after evaluation conflict', async ({ page }) => {
@@ -107,11 +383,12 @@ test.describe('review shell fixtures', () => {
     await page.route('**/api/v1/reviews/241/evaluation', (route) =>
       route.fulfill({ status: 409, json: { error: 'stale' } }),
     );
-    const rationale = page.getByRole('textbox', { name: 'Rationale' });
-    await page.getByRole('button', { name: 'Useful' }).first().click();
+    const reviewEvaluation = page.getByRole('complementary', { name: 'Review evaluation' });
+    await reviewEvaluation.getByRole('radio', { name: 'Helpful', exact: true }).click();
+    const rationale = reviewEvaluation.getByRole('textbox', { name: 'Rationale' });
     await rationale.fill('keep this draft');
-    await page.getByRole('button', { name: 'Save evaluation' }).first().click();
-    await expect(page.getByText('This evaluation changed elsewhere')).toBeVisible();
+    await reviewEvaluation.getByRole('button', { name: 'Save evaluation' }).click();
+    await expect(reviewEvaluation.getByText('This evaluation changed elsewhere')).toBeVisible();
     await expect(rationale).toHaveValue('keep this draft');
   });
 
@@ -122,7 +399,7 @@ test.describe('review shell fixtures', () => {
       ['context-error', 'Context error'],
     ] as const) {
       await page.goto(`/en/reviews/241?fixture=${scenario}`);
-      await page.getByRole('button', { name: 'Evidence and suggested action' }).first().click();
+      await page.getByRole('button', { name: 'View evidence' }).first().click();
       await page.getByRole('button', { name: 'Load context' }).first().click();
       await expect(page.getByText(expected).first()).toBeVisible();
     }
@@ -162,14 +439,19 @@ test.describe('review shell fixtures', () => {
       };
       await route.fulfill({ json: { revision, current: revision } });
     });
-    const useful = page.getByRole('button', { name: 'Useful', exact: true }).first();
-    await useful.focus();
+    const reviewEvaluation = page.getByRole('complementary', { name: 'Review evaluation' });
+    const helpful = reviewEvaluation.getByRole('radio', { name: 'Helpful', exact: true });
+    await helpful.focus();
     await page.keyboard.press('Enter');
-    await expect(useful).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('textbox', { name: 'Rationale' }).first().fill('mobile keyboard review');
-    await page.getByRole('button', { name: 'Save evaluation' }).first().tap();
-    await expect(page.getByRole('status')).toContainText('Evaluation saved');
-    await page.getByRole('button', { name: 'View history' }).first().tap();
-    await expect(page.getByText('mobile keyboard review')).toBeVisible();
+    await expect(helpful).toHaveAttribute('aria-checked', 'true');
+    await reviewEvaluation
+      .getByRole('textbox', { name: 'Rationale' })
+      .fill('mobile keyboard review');
+    await reviewEvaluation.getByRole('button', { name: 'Save evaluation' }).tap();
+    await expect(reviewEvaluation.getByRole('status')).toContainText('Evaluation saved');
+    await reviewEvaluation.getByRole('button', { name: 'View history' }).tap();
+    await expect(
+      reviewEvaluation.getByText('· mobile keyboard review', { exact: true }),
+    ).toBeVisible();
   });
 });

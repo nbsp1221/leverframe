@@ -188,6 +188,17 @@ export const reviewListResponseSchema = z.object({
   total_pages: z.number().int().nonnegative(),
 });
 
+export const reviewMetricsResponseSchema = z.object({
+  terminal_window_size: z.number().int().positive(),
+  terminal_sample_size: z.number().int().nonnegative(),
+  completed_sample_size: z.number().int().nonnegative(),
+  failed_sample_size: z.number().int().nonnegative(),
+  duration_sample_size: z.number().int().nonnegative(),
+  average_duration_ms: z.number().nonnegative().nullable(),
+  median_duration_ms: z.number().nonnegative().nullable(),
+  failure_rate: z.number().min(0).max(1).nullable(),
+});
+
 export const reviewFindingSchema = z.object({
   fingerprint: z.string().regex(/^[0-9a-f]{16}$/),
   severity: z.enum(['critical', 'high', 'medium', 'low']),
@@ -330,6 +341,7 @@ export type StatusResponse = z.infer<typeof statusResponseSchema>;
 export type DependencyStatus = z.infer<typeof dependencyStatusSchema>;
 export type ReviewListItem = z.infer<typeof reviewListItemSchema>;
 export type ReviewListResponse = z.infer<typeof reviewListResponseSchema>;
+export type ReviewMetricsResponse = z.infer<typeof reviewMetricsResponseSchema>;
 export type ReviewDetail = z.infer<typeof reviewDetailSchema>;
 export type ReviewExecutionEvent = z.infer<typeof reviewExecutionEventSchema>;
 export type ReviewExecutionSnapshot = z.infer<typeof reviewExecutionSnapshotSchema>;
