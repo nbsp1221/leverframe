@@ -6,7 +6,7 @@ function payload(overrides: { body?: string; pullRequest?: boolean; userType?: s
     JSON.stringify({
       action: 'created',
       comment: {
-        body: overrides.body ?? '/retn0 review',
+        body: overrides.body ?? '@leverframe review',
         id: 99,
         user: { login: 'octocat', type: overrides.userType ?? 'User' },
       },
@@ -22,10 +22,14 @@ function payload(overrides: { body?: string; pullRequest?: boolean; userType?: s
 
 describe('manual review commands', () => {
   it('accepts only the fixed grammar at the start of a comment', () => {
-    expect(parseManualCommand('/retn0 review')).toBe('review');
-    expect(parseManualCommand('/retn0 review full\nplease run it')).toBe('review_full');
-    expect(parseManualCommand('please /retn0 review')).toBeUndefined();
-    expect(parseManualCommand('/retn0 review --model expensive')).toBeUndefined();
+    expect(parseManualCommand('@leverframe cancel')).toBe('cancel');
+    expect(parseManualCommand('@leverframe retry')).toBe('retry');
+    expect(parseManualCommand('@leverframe review')).toBe('review');
+    expect(parseManualCommand('@leverframe review full\nplease run it')).toBe('review_full');
+    expect(parseManualCommand('@leverframe status')).toBe('status');
+    expect(parseManualCommand('please @leverframe review')).toBeUndefined();
+    expect(parseManualCommand('@leverframe review --model expensive')).toBeUndefined();
+    expect(parseManualCommand('/retn0 review')).toBeUndefined();
   });
 
   it('normalizes human pull request comments and ignores bots and issues', () => {

@@ -31,11 +31,11 @@ const issueCommentSchema = z.object({
 });
 
 const commands = new Map<string, ManualCommandName>([
-  ['/retn0 cancel', 'cancel'],
-  ['/retn0 retry', 'retry'],
-  ['/retn0 review', 'review'],
-  ['/retn0 review full', 'review_full'],
-  ['/retn0 status', 'status'],
+  ['@leverframe cancel', 'cancel'],
+  ['@leverframe retry', 'retry'],
+  ['@leverframe review', 'review'],
+  ['@leverframe review full', 'review_full'],
+  ['@leverframe status', 'status'],
 ]);
 
 export function parseManualCommand(body: string): ManualCommandName | undefined {

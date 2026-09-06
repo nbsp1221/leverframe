@@ -84,7 +84,7 @@ function commandBody(): Buffer {
     JSON.stringify({
       action: 'created',
       comment: {
-        body: '/retn0 status',
+        body: '@leverframe status',
         id: 99,
         user: { login: 'octocat', type: 'User' },
       },
