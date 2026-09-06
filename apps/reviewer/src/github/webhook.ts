@@ -59,6 +59,7 @@ export function decideWebhook(input: {
   body: Buffer;
   deliveryId: string;
   event: string;
+  githubAppSlug: string;
   policyVersion?: string;
 }): WebhookDecision {
   if (input.event === 'issue_comment' || input.event === 'pull_request') {
@@ -69,6 +70,7 @@ export function decideWebhook(input: {
   }
   if (input.event === 'issue_comment') {
     const command = normalizeManualCommand({
+      appSlug: input.githubAppSlug,
       body: input.body,
       deliveryId: input.deliveryId,
     });

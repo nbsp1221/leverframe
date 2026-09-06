@@ -51,6 +51,7 @@ describe('GitHub webhook intake', () => {
       body: pullRequestBody(),
       deliveryId: 'delivery-1',
       event: 'pull_request',
+      githubAppSlug: 'leverframe',
     });
 
     expect(decision).toEqual({
@@ -75,6 +76,7 @@ describe('GitHub webhook intake', () => {
         body: pullRequestBody({ ownerId: 2 }),
         deliveryId: 'delivery-owner',
         event: 'pull_request',
+        githubAppSlug: 'leverframe',
       }),
     ).toEqual({ kind: 'ignore', reason: 'repository owner is not allowed' });
   });
@@ -85,6 +87,7 @@ describe('GitHub webhook intake', () => {
         body: pullRequestBody({ draft: true }),
         deliveryId: 'delivery-1',
         event: 'pull_request',
+        githubAppSlug: 'leverframe',
       }),
     ).toEqual({ kind: 'ignore', reason: 'draft pull request' });
 
@@ -93,6 +96,7 @@ describe('GitHub webhook intake', () => {
         body: pullRequestBody({ action: 'labeled' }),
         deliveryId: 'delivery-2',
         event: 'pull_request',
+        githubAppSlug: 'leverframe',
       }),
     ).toEqual({ kind: 'ignore', reason: 'unsupported action: labeled' });
 
@@ -105,6 +109,7 @@ describe('GitHub webhook intake', () => {
         }),
         deliveryId: 'delivery-3',
         event: 'pull_request',
+        githubAppSlug: 'leverframe',
       }),
     ).toEqual({ kind: 'ignore', reason: 'synchronize event did not change the head' });
   });
@@ -117,6 +122,7 @@ describe('GitHub webhook intake', () => {
           body: pullRequestBody({ action, draft: action === 'converted_to_draft' }),
           deliveryId: 'delivery-4',
           event: 'pull_request',
+          githubAppSlug: 'leverframe',
         }),
       ).toEqual({
         cancellation: {

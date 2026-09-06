@@ -22,30 +22,44 @@ function payload(overrides: { body?: string; pullRequest?: boolean; userType?: s
 
 describe('manual review commands', () => {
   it('accepts only the fixed grammar at the start of a comment', () => {
-    expect(parseManualCommand('@leverframe cancel')).toBe('cancel');
-    expect(parseManualCommand('@leverframe retry')).toBe('retry');
-    expect(parseManualCommand('@leverframe review')).toBe('review');
-    expect(parseManualCommand('@leverframe review full\nplease run it')).toBe('review_full');
-    expect(parseManualCommand('@leverframe status')).toBe('status');
-    expect(parseManualCommand('please @leverframe review')).toBeUndefined();
-    expect(parseManualCommand('@leverframe review --model expensive')).toBeUndefined();
-    expect(parseManualCommand('/retn0 review')).toBeUndefined();
+    expect(parseManualCommand('@leverframe cancel', 'leverframe')).toBe('cancel');
+    expect(parseManualCommand('@leverframe retry', 'leverframe')).toBe('retry');
+    expect(parseManualCommand('@leverframe review', 'leverframe')).toBe('review');
+    expect(parseManualCommand('@leverframe review full\nplease run it', 'leverframe')).toBe(
+      'review_full',
+    );
+    expect(parseManualCommand('@leverframe status', 'leverframe')).toBe('status');
+    expect(parseManualCommand('@example-reviewer status', 'example-reviewer')).toBe('status');
+    expect(parseManualCommand('@leverframe status', 'example-reviewer')).toBeUndefined();
+    expect(parseManualCommand('please @leverframe review', 'leverframe')).toBeUndefined();
+    expect(
+      parseManualCommand('@leverframe review --model expensive', 'leverframe'),
+    ).toBeUndefined();
+    expect(parseManualCommand('/retn0 review', 'leverframe')).toBeUndefined();
   });
 
   it('normalizes human pull request comments and ignores bots and issues', () => {
-    expect(normalizeManualCommand({ body: payload(), deliveryId: 'delivery-1' })).toMatchObject({
+    expect(
+      normalizeManualCommand({
+        appSlug: 'leverframe',
+        body: payload(),
+        deliveryId: 'delivery-1',
+      }),
+    ).toMatchObject({
       actor: 'octocat',
       command: 'review',
       pullRequestNumber: 7,
     });
     expect(
       normalizeManualCommand({
+        appSlug: 'leverframe',
         body: payload({ userType: 'Bot' }),
         deliveryId: 'delivery-2',
       }),
     ).toBeUndefined();
     expect(
       normalizeManualCommand({
+        appSlug: 'leverframe',
         body: payload({ pullRequest: false }),
         deliveryId: 'delivery-3',
       }),
