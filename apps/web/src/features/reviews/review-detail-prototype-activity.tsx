@@ -9,7 +9,11 @@ import {
 import { Spinner } from '@repo/ui/components/spinner';
 import { ActivityIcon, TerminalIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { applyExecutionEvent, isTerminalExecution } from './review-execution-state';
+import {
+  applyExecutionEvent,
+  isTerminalExecution,
+  mergeExecutionSnapshot,
+} from './review-execution-state';
 
 type Props = {
   reviewId: number;
@@ -78,7 +82,7 @@ export function ReviewDetailPrototypeActivity({ reviewId, mode }: Props) {
           }
           try {
             const next = reviewExecutionSnapshotSchema.parse(JSON.parse(message.data));
-            setSnapshot(next);
+            setSnapshot((current) => mergeExecutionSnapshot(current, next));
             if (isTerminalExecution(next.status)) {
               source?.close();
               setConnection('closed');

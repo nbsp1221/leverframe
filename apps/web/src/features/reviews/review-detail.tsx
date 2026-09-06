@@ -68,15 +68,23 @@ export async function ReviewDetailPage({
         <main className="min-w-0 space-y-5">
           <StatusOverview detail={detail} t={t} returnQuery={returnQuery} />
 
+          {detail.status === 'queued' ? (
+            <ReviewLiveActivity reviewId={detail.id} mode="sync" initialStatus={detail.status} />
+          ) : null}
+
           {detail.status === 'running' ? (
             <PrimarySurface>
-              <ReviewLiveActivity reviewId={detail.id} mode="live" />
+              <ReviewLiveActivity reviewId={detail.id} mode="live" initialStatus={detail.status} />
             </PrimarySurface>
           ) : null}
 
           {['failed', 'superseded', 'cancelled'].includes(detail.status) ? (
             <PrimarySurface>
-              <ReviewLiveActivity reviewId={detail.id} mode="recent" />
+              <ReviewLiveActivity
+                reviewId={detail.id}
+                mode="recent"
+                initialStatus={detail.status}
+              />
             </PrimarySurface>
           ) : null}
 

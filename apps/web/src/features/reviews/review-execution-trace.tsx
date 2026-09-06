@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   applyExecutionEvent,
   isTerminalExecution,
+  mergeExecutionSnapshot,
   shouldRefreshForTerminalSnapshot,
 } from './review-execution-state';
 
@@ -99,7 +100,7 @@ export function ReviewExecutionTrace({ reviewId }: { reviewId: number }) {
               return;
             }
             const next = reviewExecutionSnapshotSchema.parse(JSON.parse(message.data));
-            setSnapshot((current) => mergeSnapshot(current, next));
+            setSnapshot((current) => mergeExecutionSnapshot(current, next));
             if (isTerminalExecution(next.status)) {
               source?.close();
               setConnection('closed');
@@ -287,16 +288,6 @@ function eventTitle(event: ReviewExecutionEvent, t: Translator): string {
     return `${t('commandCompleted')} · ${result ?? t('unknown')}${duration}`;
   }
   return t(`traceEvent_${event.type}`);
-}
-
-function mergeSnapshot(
-  current: ReviewExecutionSnapshot | null,
-  incoming: ReviewExecutionSnapshot,
-): ReviewExecutionSnapshot {
-  if (current === null) {
-    return incoming;
-  }
-  return { ...incoming, events: incoming.events.length === 0 ? current.events : incoming.events };
 }
 
 function visibleEvent(event: ReviewExecutionEvent): boolean {

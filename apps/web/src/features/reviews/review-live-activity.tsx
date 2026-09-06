@@ -9,22 +9,31 @@ import {
 import { Spinner } from '@repo/ui/components/spinner';
 import { ActivityIcon, TerminalIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useEffect, useMemo, useState } from 'react';
-import { applyExecutionEvent, isTerminalExecution } from './review-execution-state';
+import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+import {
+  applyExecutionEvent,
+  isTerminalExecution,
+  mergeExecutionSnapshot,
+  shouldRefreshForStatusChange,
+} from './review-execution-state';
 
 type ConnectionState = 'loading' | 'live' | 'reconnecting' | 'closed' | 'error';
 
 type Props = {
   reviewId: number;
-  mode: 'live' | 'recent';
+  mode: 'live' | 'recent' | 'sync';
+  initialStatus: ReviewExecutionSnapshot['status'];
 };
 
-export function ReviewLiveActivity({ reviewId, mode }: Props) {
+export function ReviewLiveActivity({ reviewId, mode, initialStatus }: Props) {
   const t = useTranslations('reviewDetail');
   const locale = useLocale();
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState<ReviewExecutionSnapshot | null>(null);
   const [connection, setConnection] = useState<ConnectionState>('loading');
   const [now, setNow] = useState(() => Date.now());
+  const refreshedRef = useRef(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1_000);
@@ -36,6 +45,15 @@ export function ReviewLiveActivity({ reviewId, mode }: Props) {
     let source: EventSource | undefined;
     let handleTrace: ((message: MessageEvent) => void) | undefined;
     let handleSnapshot: ((message: MessageEvent) => void) | undefined;
+
+    function refreshForStatusChange(status: ReviewExecutionSnapshot['status']): boolean {
+      if (!shouldRefreshForStatusChange(initialStatus, status, refreshedRef.current)) {
+        return false;
+      }
+      refreshedRef.current = true;
+      router.refresh();
+      return true;
+    }
 
     async function connect() {
       try {
@@ -50,6 +68,12 @@ export function ReviewLiveActivity({ reviewId, mode }: Props) {
           return;
         }
         setSnapshot(parsed);
+        if (refreshForStatusChange(parsed.status)) {
+          if (isTerminalExecution(parsed.status)) {
+            setConnection('closed');
+          }
+          return;
+        }
         if (isTerminalExecution(parsed.status)) {
           setConnection('closed');
           return;
@@ -81,10 +105,13 @@ export function ReviewLiveActivity({ reviewId, mode }: Props) {
           }
           try {
             const next = reviewExecutionSnapshotSchema.parse(JSON.parse(message.data));
-            setSnapshot(next);
-            if (isTerminalExecution(next.status)) {
+            setSnapshot((current) => mergeExecutionSnapshot(current, next));
+            if (next.status !== initialStatus) {
               source?.close();
-              setConnection('closed');
+              if (isTerminalExecution(next.status)) {
+                setConnection('closed');
+              }
+              refreshForStatusChange(next.status);
             }
           } catch {
             // A later valid snapshot can recover this panel.
@@ -110,12 +137,14 @@ export function ReviewLiveActivity({ reviewId, mode }: Props) {
       }
       source?.close();
     };
-  }, [reviewId]);
+  }, [initialStatus, reviewId, router]);
 
-  const events = useMemo(() => {
-    const visible = snapshot?.events.filter(isUsefulEvent) ?? [];
-    return visible.slice(-8).reverse();
-  }, [snapshot]);
+  const visibleEvents = snapshot?.events.filter(isUsefulEvent) ?? [];
+  const events = visibleEvents.slice(-8).reverse();
+
+  if (mode === 'sync') {
+    return null;
+  }
 
   return (
     <section aria-label={mode === 'live' ? t('activityLiveTitle') : t('activityRecentTitle')}>
