@@ -31,19 +31,23 @@ const issueCommentSchema = z.object({
 });
 
 const commands = new Map<string, ManualCommandName>([
-  ['/retn0 cancel', 'cancel'],
-  ['/retn0 retry', 'retry'],
-  ['/retn0 review', 'review'],
-  ['/retn0 review full', 'review_full'],
-  ['/retn0 status', 'status'],
+  ['cancel', 'cancel'],
+  ['retry', 'retry'],
+  ['review', 'review'],
+  ['review full', 'review_full'],
+  ['status', 'status'],
 ]);
 
-export function parseManualCommand(body: string): ManualCommandName | undefined {
+export function parseManualCommand(body: string, appSlug: string): ManualCommandName | undefined {
   const firstLine = body.split(/\r?\n/, 1)[0]?.trim();
-  return firstLine === undefined ? undefined : commands.get(firstLine);
+  const prefix = `@${appSlug} `;
+  return firstLine?.startsWith(prefix) === true
+    ? commands.get(firstLine.slice(prefix.length))
+    : undefined;
 }
 
 export function normalizeManualCommand(input: {
+  appSlug: string;
   body: Buffer;
   deliveryId: string;
 }): ManualCommand | undefined {
@@ -55,7 +59,7 @@ export function normalizeManualCommand(input: {
   ) {
     return undefined;
   }
-  const command = parseManualCommand(payload.comment.body);
+  const command = parseManualCommand(payload.comment.body, input.appSlug);
   if (command === undefined) {
     return undefined;
   }
