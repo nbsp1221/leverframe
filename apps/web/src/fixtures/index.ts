@@ -38,6 +38,7 @@ export const fixtureScenarios = [
   'context-loading',
   'context-error',
   'stress',
+  'stress-many-findings',
   'finding-open',
   'finding-fixed',
   'finding-still-present',
@@ -293,6 +294,14 @@ export function createFixture(scenario: FixtureScenario = 'default'): FixtureSta
       total_findings: 3,
     });
   }
+  if (scenario === 'stress-many-findings') {
+    state.activeReview = review({
+      pull_request_title: 'Stress review with many findings across severity levels',
+      findings_count: 10,
+      total_findings: 10,
+      highest_severity: 'high',
+    });
+  }
   if (
     scenario === 'finding-open' ||
     scenario === 'finding-fixed' ||
@@ -360,7 +369,16 @@ export function fixtureDetailResponse(
   const findings = artifactAvailable
     ? Array.from({ length: item.findings_count ?? 0 }, (_, index) => ({
         fingerprint: (index + 1).toString(16).padStart(16, '0'),
-        severity: index === 0 ? (item.highest_severity ?? 'medium') : 'low',
+        severity:
+          state.scenario === 'stress-many-findings'
+            ? index === 0
+              ? 'high'
+              : index < 4
+                ? 'medium'
+                : 'low'
+            : index === 0
+              ? (item.highest_severity ?? 'medium')
+              : 'low',
         confidence: 'high' as const,
         title: `Finding ${index + 1}: verify the review boundary`,
         explanation: 'The persisted finding explanation is shown without translation.',

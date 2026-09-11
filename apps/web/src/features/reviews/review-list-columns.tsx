@@ -2,16 +2,15 @@
 
 import type { ReviewListItem } from '@repo/contracts';
 import type { tableFeatures } from '@tanstack/react-table';
-import { Badge } from '@repo/ui/components/badge';
 import { Button } from '@repo/ui/components/button';
 import { createColumnHelper } from '@tanstack/react-table';
 import { ExternalLinkIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { Link } from '../../i18n/navigation';
+import { formatDuration } from './review-format';
 
 type Translation = (key: string, values?: Record<string, number>) => string;
-
 type TableFeatures = ReturnType<typeof tableFeatures>;
 
 const columnHelper = createColumnHelper<TableFeatures, ReviewListItem>();
@@ -25,21 +24,21 @@ export function createReviewColumns(
   return [
     columnHelper.display({
       id: 'repository',
-      header: () => t('repository'),
+      header: () => t('reviewColumn'),
       // oxlint-disable-next-line react/no-unstable-nested-components
       cell: ({ row }) => {
         const item = row.original;
         return (
           <Link
             href={`/reviews/${item.id}${returnQuery ? `?${returnQuery}` : detailScenario ? `?fixture=${detailScenario}` : ''}`}
-            className="block min-w-0"
+            className="group block min-w-0 py-0.5"
             onClick={(event) => event.stopPropagation()}
           >
-            <p className="truncate font-medium">
-              {item.repository} · #{item.pull_request_number}
-            </p>
-            <p className="truncate text-muted-foreground">
+            <p className="truncate text-base font-semibold tracking-[-0.015em] text-foreground transition-colors group-hover:text-link">
               {item.pull_request_title ?? t('untitled')}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {item.repository} · PR #{item.pull_request_number}
             </p>
           </Link>
         );
@@ -49,87 +48,40 @@ export function createReviewColumns(
       id: 'status',
       header: () => common('status'),
       // oxlint-disable-next-line react/no-unstable-nested-components
-      cell: ({ row }) => <StatusBadge status={row.original.status} t={t} />,
-    }),
-    columnHelper.display({
-      id: 'runId',
-      header: () => t('runId'),
-      // oxlint-disable-next-line react/no-unstable-nested-components
-      cell: ({ row }) => <span className="font-mono text-xs">#{row.original.id}</span>,
-    }),
-    columnHelper.display({
-      id: 'model',
-      header: () => t('model'),
-      // oxlint-disable-next-line react/no-unstable-nested-components
-      cell: ({ row }) => (
-        <>
-          {row.original.model ?? '—'}
-          <span className="block text-xs text-muted-foreground">
-            {row.original.reasoning ?? '—'}
-          </span>
-        </>
-      ),
+      cell: ({ row }) => <StatusSignal status={row.original.status} t={t} />,
     }),
     columnHelper.display({
       id: 'findings',
-      header: () => t('findings'),
+      header: () => t('issues'),
       // oxlint-disable-next-line react/no-unstable-nested-components
-      cell: ({ row }) => (
-        <>
-          {row.original.findings_count ?? '—'}
-          {row.original.highest_severity ? (
-            <span className="block text-xs text-muted-foreground">
-              {t(row.original.highest_severity)}
-            </span>
-          ) : null}
-        </>
-      ),
+      cell: ({ row }) => <FindingSummary item={row.original} t={t} />,
     }),
     columnHelper.display({
       id: 'evaluation',
       header: () => t('evaluation'),
       // oxlint-disable-next-line react/no-unstable-nested-components
-      cell: ({ row }) => {
-        const value = row.original.review_evaluation;
-        return (
-          <span className="text-sm">
-            {value ? t(value) : t('notEvaluated')} · {row.original.evaluated_findings}/
-            {row.original.total_findings}
-          </span>
-        );
-      },
+      cell: ({ row }) => <EvaluationSummary item={row.original} t={t} />,
     }),
     columnHelper.display({
       id: 'duration',
       header: () => t('duration'),
       // oxlint-disable-next-line react/no-unstable-nested-components
-      cell: ({ row }) => formatDuration(row.original.duration_ms),
-    }),
-    columnHelper.display({
-      id: 'timing',
-      header: () => t('timing'),
-      // oxlint-disable-next-line react/no-unstable-nested-components
       cell: ({ row }) => (
-        <div className="flex flex-col text-xs">
-          <span>
-            {t('started')}:{' '}
-            <RelativeTime value={row.original.started_at ?? row.original.created_at} />
-          </span>
-          <span className="text-muted-foreground">
-            {t('completed')}: <RelativeTime value={row.original.completed_at} />
-          </span>
-        </div>
+        <span className="text-sm tabular-nums text-foreground">
+          {formatDuration(row.original.duration_ms)}
+        </span>
       ),
     }),
     columnHelper.display({
       id: 'actions',
-      header: () => t('actions'),
+      header: () => '',
       // oxlint-disable-next-line react/no-unstable-nested-components
       cell: ({ row }) => (
         <Button
           variant="ghost"
           size="icon-sm"
           nativeButton={false}
+          className="rounded-lg text-muted-foreground hover:text-foreground"
           aria-label={t('openGitHub')}
           onClick={(event) => event.stopPropagation()}
           render={
@@ -148,34 +100,90 @@ export function createReviewColumns(
 }
 
 export function columnClass(id: string) {
-  if (id === 'runId') {
-    return 'hidden md:table-cell';
+  if (id === 'repository') {
+    return 'w-[44%] min-w-[18rem]';
   }
-  if (id === 'model') {
-    return 'hidden lg:table-cell';
+  if (id === 'status') {
+    return 'w-[12%]';
+  }
+  if (id === 'findings') {
+    return 'w-[11%]';
+  }
+  if (id === 'evaluation') {
+    return 'w-[18%]';
   }
   if (id === 'duration') {
-    return 'hidden sm:table-cell';
-  }
-  if (id === 'timing') {
-    return 'hidden xl:table-cell';
+    return 'w-[11%]';
   }
   if (id === 'actions') {
-    return 'text-right';
+    return 'w-10 text-right';
   }
   return undefined;
 }
 
-function StatusBadge({ status, t }: { status: string; t: Translation }) {
+export function StatusSignal({ status, t }: { status: string; t: Translation }) {
+  const tone =
+    status === 'completed'
+      ? 'text-success'
+      : status === 'running' || status === 'queued'
+        ? 'text-info'
+        : status === 'failed'
+          ? 'text-danger'
+          : 'text-muted-foreground';
   return (
-    <Badge
-      variant={
-        status === 'failed' ? 'destructive' : status === 'completed' ? 'secondary' : 'outline'
-      }
-    >
+    <span className={`inline-flex items-center gap-2 text-xs font-semibold ${tone}`}>
+      <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
       {t(status)}
-    </Badge>
+    </span>
   );
+}
+
+export function FindingSummary({ item, t }: { item: ReviewListItem; t: Translation }) {
+  if (item.findings_count === null) {
+    return <span className="text-sm text-muted-foreground">—</span>;
+  }
+  const tone =
+    item.highest_severity === 'critical' || item.highest_severity === 'high'
+      ? 'text-danger'
+      : item.highest_severity === 'medium'
+        ? 'text-warning'
+        : 'text-foreground';
+  return (
+    <div className={tone}>
+      <span className="text-sm font-semibold tabular-nums">{item.findings_count}</span>
+      {item.highest_severity ? (
+        <span className="mt-0.5 block text-xs font-medium">{t(item.highest_severity)}</span>
+      ) : null}
+    </div>
+  );
+}
+
+export function EvaluationSummary({ item, t }: { item: ReviewListItem; t: Translation }) {
+  if (item.review_evaluation) {
+    return (
+      <div>
+        <span className="text-sm font-medium text-foreground">{t(item.review_evaluation)}</span>
+        {item.total_findings > 0 ? (
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {item.evaluated_findings}/{item.total_findings}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  if (item.status === 'completed') {
+    return (
+      <div>
+        <span className="text-sm font-medium text-foreground">{t('needsReview')}</span>
+        {item.total_findings > 0 ? (
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {item.evaluated_findings}/{item.total_findings}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  return <span className="text-sm text-muted-foreground">—</span>;
 }
 
 export function RelativeTime({ value }: { value: string | null }) {
@@ -207,12 +215,4 @@ function formatRelativeTime(value: string, now: number, t: Translation): string 
     return t('relativeHours', { count: hours });
   }
   return t('relativeDays', { count: Math.floor(hours / 24) });
-}
-
-function formatDuration(value: number | null): string {
-  if (value === null) {
-    return '—';
-  }
-  const seconds = Math.round(value / 1000);
-  return seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
 }

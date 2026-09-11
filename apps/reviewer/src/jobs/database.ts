@@ -25,6 +25,7 @@ import {
   type PreviousReview,
   type ReviewArtifact,
   type ReviewFinding,
+  type ReviewMetrics,
   ReviewRepository,
 } from '../storage/review-repository.js';
 import type { ManualCommand } from './command.js';
@@ -406,6 +407,10 @@ export class JobDatabase {
         };
       }),
     };
+  }
+
+  getReviewMetrics(terminalWindowSize = 50): ReviewMetrics {
+    return this.#reviewRepository.getReviewMetrics(terminalWindowSize);
   }
 
   getReviewJob(id: number): ReviewDetailRow | undefined {

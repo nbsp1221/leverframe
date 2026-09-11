@@ -1,6 +1,7 @@
 import { Button } from '@repo/ui/components/button';
 import { getTranslations } from 'next-intl/server';
 import { Link } from '../../i18n/navigation';
+import { ReviewPageFrame } from './review-page-frame';
 
 export async function ReviewDetailNotFoundState({
   returnQuery = '',
@@ -9,7 +10,7 @@ export async function ReviewDetailNotFoundState({
 }) {
   const t = await getTranslations('reviewDetail');
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-3">
+    <ReviewPageFrame className="flex flex-col gap-3">
       <h1 className="text-2xl font-semibold tracking-tight">{t('notFoundTitle')}</h1>
       <p className="text-sm text-muted-foreground">{t('notFoundDescription')}</p>
       <Button
@@ -18,6 +19,6 @@ export async function ReviewDetailNotFoundState({
       >
         {t('backToList')}
       </Button>
-    </div>
+    </ReviewPageFrame>
   );
 }

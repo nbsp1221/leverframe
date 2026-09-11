@@ -5,7 +5,12 @@ import {
   reviewExecutionSnapshotSchema,
 } from '@repo/contracts';
 import { describe, expect, it } from 'vitest';
-import { applyExecutionEvent, shouldRefreshForTerminalSnapshot } from './review-execution-state';
+import {
+  applyExecutionEvent,
+  mergeExecutionSnapshot,
+  shouldRefreshForStatusChange,
+  shouldRefreshForTerminalSnapshot,
+} from './review-execution-state';
 
 const snapshot: ReviewExecutionSnapshot = reviewExecutionSnapshotSchema.parse({
   review_id: 42,
@@ -74,6 +79,29 @@ describe('review execution state', () => {
     );
     expect(completed.current_command).toBeNull();
     expect(completed.last_activity_at).toBe('2026-08-24T00:00:03.000Z');
+  });
+
+  it('preserves retained events when a state-only snapshot has no events', () => {
+    const retained = applyExecutionEvent(
+      snapshot,
+      event({ type: 'agent_message', message: 'retained activity' }),
+    );
+    const incoming = reviewExecutionSnapshotSchema.parse({
+      ...retained,
+      last_activity_at: '2026-08-24T00:00:02.000Z',
+      events: [],
+    });
+
+    const merged = mergeExecutionSnapshot(retained, incoming);
+    expect(merged.events).toEqual(retained.events);
+    expect(merged.last_activity_at).toBe('2026-08-24T00:00:02.000Z');
+  });
+
+  it('refreshes once when the execution status changes after server rendering', () => {
+    expect(shouldRefreshForStatusChange('running', 'completed', false)).toBe(true);
+    expect(shouldRefreshForStatusChange('queued', 'running', false)).toBe(true);
+    expect(shouldRefreshForStatusChange('running', 'running', false)).toBe(false);
+    expect(shouldRefreshForStatusChange('running', 'completed', true)).toBe(false);
   });
 
   it('refreshes once when the first client snapshot is already terminal', () => {

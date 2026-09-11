@@ -3,6 +3,7 @@ import { Button } from '@repo/ui/components/button';
 import { AlertCircleIcon } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { Link } from '../../i18n/navigation';
+import { ReviewPageFrame } from './review-page-frame';
 
 export async function ReviewDetailErrorState({
   kind,
@@ -25,7 +26,7 @@ export async function ReviewDetailErrorState({
     ? key
     : 'error_generic';
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+    <ReviewPageFrame className="flex flex-col gap-4">
       <Alert variant="destructive">
         <AlertCircleIcon aria-hidden="true" />
         <AlertTitle>{t('errorTitle')}</AlertTitle>
@@ -46,6 +47,6 @@ export async function ReviewDetailErrorState({
           {t('backToList')}
         </Button>
       </div>
-    </div>
+    </ReviewPageFrame>
   );
 }

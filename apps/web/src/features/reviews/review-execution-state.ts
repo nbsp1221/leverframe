@@ -36,8 +36,26 @@ export function applyExecutionEvent(
   };
 }
 
+export function mergeExecutionSnapshot(
+  current: ReviewExecutionSnapshot | null,
+  incoming: ReviewExecutionSnapshot,
+): ReviewExecutionSnapshot {
+  if (current === null) {
+    return incoming;
+  }
+  return { ...incoming, events: incoming.events.length === 0 ? current.events : incoming.events };
+}
+
 export function isTerminalExecution(status: ReviewExecutionSnapshot['status']): boolean {
   return ['completed', 'failed', 'superseded', 'cancelled'].includes(status);
+}
+
+export function shouldRefreshForStatusChange(
+  initialStatus: ReviewExecutionSnapshot['status'],
+  status: ReviewExecutionSnapshot['status'],
+  refreshed: boolean,
+): boolean {
+  return !refreshed && status !== initialStatus;
 }
 
 export function shouldRefreshForTerminalSnapshot(

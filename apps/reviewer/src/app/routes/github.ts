@@ -152,8 +152,9 @@ export function registerGitHubRoutes(
       if (!credentials.exists()) {
         return json(c, { error: 'GitHub App is not registered' }, 503);
       }
+      const githubAppCredentials = credentials.read();
       const signature = c.req.header('x-hub-signature-256');
-      if (!verifyWebhookSignature(body, signature, credentials.read().webhookSecret)) {
+      if (!verifyWebhookSignature(body, signature, githubAppCredentials.webhookSecret)) {
         return json(c, { error: 'invalid signature' }, 401);
       }
       const deliveryId = c.req.header('x-github-delivery');
@@ -167,6 +168,7 @@ export function registerGitHubRoutes(
         body,
         deliveryId,
         event,
+        githubAppSlug: githubAppCredentials.slug,
       });
       if (decision.kind === 'ignore') {
         return json(c, decision, 202);

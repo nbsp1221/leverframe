@@ -26,9 +26,9 @@ export function ContextTransportProvider({
   return <ContextTransportContext value={transport}>{children}</ContextTransportContext>;
 }
 
-type Props = { reviewId: number; fingerprint: string };
+type Props = { reviewId: number; fingerprint: string; embedded?: boolean };
 
-export function FindingContext({ reviewId, fingerprint }: Props) {
+export function FindingContext({ reviewId, fingerprint, embedded = false }: Props) {
   const t = useTranslations('reviewDetail');
   const transport = useContextTransport();
   const [state, setState] = useState<'idle' | 'loading' | 'available' | 'unavailable' | 'error'>(
@@ -62,7 +62,13 @@ export function FindingContext({ reviewId, fingerprint }: Props) {
   }
 
   return (
-    <section className="flex flex-col gap-2 rounded-md border border-border p-3">
+    <section
+      className={
+        embedded
+          ? 'flex flex-col gap-3'
+          : 'flex flex-col gap-3 rounded-xl border border-border/70 bg-surface p-4'
+      }
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-medium">{t('codeContext')}</p>
         {state === 'idle' || state === 'error' ? (

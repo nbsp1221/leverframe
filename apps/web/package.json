@@ -26,6 +26,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.62.1",
     "@repo/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "4.3.3",

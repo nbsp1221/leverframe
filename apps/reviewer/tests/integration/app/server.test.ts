@@ -45,9 +45,9 @@ async function startServer(hooks: Parameters<typeof createLeverframeServer>[3] =
   credentials.write({
     appId: 42,
     clientId: 'client-id',
-    name: 'leverframe',
+    name: 'Example Reviewer',
     privateKey: 'private-key',
-    slug: 'leverframe',
+    slug: 'example-reviewer',
     webhookSecret: secret,
   });
   const database = new JobDatabase(':memory:');
@@ -89,7 +89,7 @@ function commandBody(): Buffer {
     JSON.stringify({
       action: 'created',
       comment: {
-        body: '/retn0 status',
+        body: '@example-reviewer status',
         id: 99,
         user: { login: 'octocat', type: 'User' },
       },
