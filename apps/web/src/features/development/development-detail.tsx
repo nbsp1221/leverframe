@@ -161,7 +161,7 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
   })();
 
   return (
-    <div className="-my-6 flex h-[calc(100svh-3.5rem)] min-w-0 flex-col">
+    <div className="-my-6 flex h-[calc(100svh-3.5rem)] min-h-[48rem] min-w-0 flex-col">
       <DevelopmentRunHeader
         detail={detail}
         pendingAction={pendingRunAction}
@@ -213,12 +213,12 @@ function DevelopmentRunHeader({
         <ArrowLeftIcon aria-hidden="true" />
       </Button>
       <span className="shrink-0 text-xs text-muted-foreground">
-        {t('run')} #{detail.run.id}
+        <span className="hidden sm:inline">{t('run')} </span>#{detail.run.id}
       </span>
       <h1 className="truncate text-sm font-medium" title={detail.run.goal}>
         {goalSummary}
       </h1>
-      <Badge className="shrink-0" variant="secondary">
+      <Badge className="hidden shrink-0 sm:inline-flex" variant="secondary">
         {t(`phase_${detail.run.phase}`)}
       </Badge>
       <span
