@@ -1,0 +1,7 @@
+services:
+  reviewer:
+    environment:
+      MULTICA_CLI_PATH: /usr/local/bin/multica
+    volumes:
+      - ${MULTICA_HOST_CLI_PATH:?Set MULTICA_HOST_CLI_PATH to the authenticated local Multica CLI}:/usr/local/bin/multica:ro
+      - ${MULTICA_CONFIG_PATH:?Set MULTICA_CONFIG_PATH to the local Multica config file}:/home/node/.multica/config.json:ro

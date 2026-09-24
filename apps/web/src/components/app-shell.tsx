@@ -30,7 +30,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@repo/ui/components/tooltip';
-import { GitPullRequestIcon, MoonIcon, SunIcon } from 'lucide-react';
+import { BotIcon, GitPullRequestIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
@@ -107,6 +107,17 @@ function AppSidebar() {
                   <span>{t('codeReviewBot')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={pathname.includes('/development')}
+                  tooltip={t('development')}
+                  className="h-10 rounded-xl px-3 text-sm font-medium data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
+                  render={<Link href="/development" />}
+                >
+                  <BotIcon aria-hidden="true" />
+                  <span>{t('development')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -146,6 +157,7 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
   }
 
   const isDark = mounted && resolvedTheme === 'dark';
+  const isDevelopment = pathname.includes('/development');
 
   return (
     <div className="flex min-h-svh min-w-0 flex-1 flex-col bg-background">
@@ -157,20 +169,30 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
 
         <Breadcrumb aria-label={t('breadcrumb')} className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap overflow-hidden text-sm">
-            <BreadcrumbItem className="hidden sm:flex">
-              <BreadcrumbLink
-                className="font-medium text-muted-foreground transition-colors hover:text-foreground"
-                render={<Link href="/reviews" />}
-              >
-                {t('codeReviewBot')}
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator className="hidden sm:flex" />
-            <BreadcrumbItem>
-              <BreadcrumbPage className="font-semibold text-foreground">
-                {t('reviews')}
-              </BreadcrumbPage>
-            </BreadcrumbItem>
+            {isDevelopment ? (
+              <BreadcrumbItem>
+                <BreadcrumbPage className="font-semibold text-foreground">
+                  {t('development')}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            ) : (
+              <>
+                <BreadcrumbItem className="hidden sm:flex">
+                  <BreadcrumbLink
+                    className="font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    render={<Link href="/reviews" />}
+                  >
+                    {t('codeReviewBot')}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="hidden sm:flex" />
+                <BreadcrumbItem>
+                  <BreadcrumbPage className="font-semibold text-foreground">
+                    {t('reviews')}
+                  </BreadcrumbPage>
+                </BreadcrumbItem>
+              </>
+            )}
           </BreadcrumbList>
         </Breadcrumb>
 

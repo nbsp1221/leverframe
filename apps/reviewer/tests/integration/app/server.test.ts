@@ -24,6 +24,11 @@ const config: ServerConfig = {
   reasoningEffort: 'low',
   resourcesDirectory: '/unused/resources',
   sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
+  development: {
+    commitSkillDirectory: '/agent-skills/commit',
+    createPrSkillDirectory: '/agent-skills/create-pr',
+    verificationCommand: 'pnpm check',
+  },
 };
 
 const resources: Array<() => void> = [];

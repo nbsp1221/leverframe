@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Button } from '@repo/ui/components/button';
 import { AlertCircleIcon, CheckCircle2Icon } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { PageMetric } from '../../components/page-metric';
+import { PageSurface } from '../../components/page-surface';
 import { Link } from '../../i18n/navigation';
 import { formatDuration } from './review-format';
 import { ReviewPageFrame } from './review-page-frame';
@@ -51,7 +53,7 @@ export async function ReviewOverview({
         <p className="mt-1.5 text-sm text-muted-foreground">{t('subtitle')}</p>
       </header>
 
-      <section className="overflow-hidden rounded-2xl border border-border/75 bg-surface shadow-sm shadow-foreground/[0.025]">
+      <PageSurface>
         <div className="grid sm:grid-cols-3 xl:grid-cols-[minmax(28rem,1.75fr)_repeat(3,minmax(10rem,0.62fr))]">
           <div className="flex min-h-36 flex-col justify-center border-b border-border/75 px-6 py-6 sm:col-span-3 sm:px-7 xl:col-span-1 xl:border-r xl:border-b-0 xl:px-8">
             <p className="text-sm font-semibold text-muted-foreground">{t('mostImportant')}</p>
@@ -70,13 +72,13 @@ export async function ReviewOverview({
               </div>
             ) : null}
           </div>
-          <HeroMetric
+          <PageMetric
             label={t('active')}
             value={activeJobs === null ? '—' : t('reviewCount', { count: activeJobs })}
             description={activeSummary || t('activeSummary')}
             tone={activeJobs && activeJobs > 0 ? 'info' : 'default'}
           />
-          <HeroMetric
+          <PageMetric
             label={t('typicalDuration')}
             value={formatDuration(metrics?.median_duration_ms ?? null)}
             description={
@@ -88,7 +90,7 @@ export async function ReviewOverview({
                 : t('metricUnavailable')
             }
           />
-          <HeroMetric
+          <PageMetric
             label={t('failureRate')}
             value={formatFailureRate(metrics?.failure_rate ?? null)}
             description={
@@ -99,7 +101,7 @@ export async function ReviewOverview({
             last
           />
         </div>
-      </section>
+      </PageSurface>
 
       <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="min-w-0">{children}</div>
@@ -126,32 +128,6 @@ async function AttentionMessage({ count }: { count: number | null }) {
   return t('attentionHero', { count });
 }
 
-function HeroMetric({
-  label,
-  value,
-  description,
-  tone = 'default',
-  last = false,
-}: {
-  label: string;
-  value: string;
-  description: ReactNode;
-  tone?: 'default' | 'info';
-  last?: boolean;
-}) {
-  return (
-    <div
-      className={`min-w-0 px-5 py-5 sm:flex sm:min-h-36 sm:flex-col sm:justify-center sm:py-6 ${last ? '' : 'border-b border-border/75 sm:border-r sm:border-b-0'} ${tone === 'info' ? 'text-info' : ''}`}
-    >
-      <p className="text-xs font-semibold text-muted-foreground sm:truncate">{label}</p>
-      <p className="mt-1.5 text-xl font-bold tracking-[-0.025em] tabular-nums sm:truncate">
-        {value}
-      </p>
-      <div className="mt-1 text-xs text-muted-foreground sm:truncate">{description}</div>
-    </div>
-  );
-}
-
 async function SystemStatus({
   health,
   dependencies,
@@ -170,7 +146,7 @@ async function SystemStatus({
       : 'bg-danger-soft text-danger';
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/75 bg-surface shadow-sm shadow-foreground/[0.025]">
+    <PageSurface>
       <div className="flex items-start gap-3 border-b border-border/70 p-5">
         <span className={`grid size-9 shrink-0 place-items-center rounded-xl ${tone}`}>
           <Icon aria-hidden="true" className="size-4.5" />
@@ -196,7 +172,7 @@ async function SystemStatus({
           </div>
         ))}
       </div>
-    </section>
+    </PageSurface>
   );
 }
 

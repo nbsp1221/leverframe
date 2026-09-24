@@ -104,6 +104,34 @@ describe('server configuration', () => {
     });
   });
 
+  it('enables development for the GitHub App repository catalog with conservative defaults', () => {
+    expect(
+      loadServerConfig({
+        APP_UI_BASE_URL: 'https://leverframe.retn0.dev',
+        GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
+        GITHUB_ALLOWED_OWNER_ID: '42',
+        GITHUB_APP_NAME: 'example-leverframe-app',
+        REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
+      }).development,
+    ).toEqual({
+      commitSkillDirectory: '/agent-skills/commit',
+      createPrSkillDirectory: '/agent-skills/create-pr',
+      verificationCommand: 'pnpm check',
+    });
+  });
+
+  it('rejects malformed development configuration without a compatibility fallback', () => {
+    const environment = {
+      APP_UI_BASE_URL: 'https://leverframe.retn0.dev',
+      GITHUB_WEBHOOK_URL: 'https://github.example.com/webhooks/github',
+      GITHUB_ALLOWED_OWNER_ID: '42',
+      GITHUB_APP_NAME: 'example-leverframe-app',
+      REVIEW_SANDBOX_TEMPLATE: sandboxTemplate,
+      DEVELOPMENT_VERIFICATION_COMMAND: '   ',
+    };
+    expect(() => loadServerConfig(environment)).toThrow();
+  });
+
   it('rejects unsupported reasoning effort instead of silently falling back', () => {
     expect(() =>
       loadServerConfig({

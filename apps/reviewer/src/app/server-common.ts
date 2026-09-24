@@ -1,4 +1,10 @@
-import type { dependencyStatusSchema, reviewStatusSchema } from '@repo/contracts';
+import type {
+  DevelopmentRepository,
+  DevelopmentTicket,
+  DevelopmentTicketImport,
+  dependencyStatusSchema,
+  reviewStatusSchema,
+} from '@repo/contracts';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
@@ -31,6 +37,43 @@ export interface ServerHooks {
   onJobQueued?: (job: PullRequestJobInput) => void;
   onManualCommand?: (command: ManualCommand) => Promise<{ status: string }>;
   onPullRequestCancelled?: (cancellation: PullRequestCancellationInput) => void;
+  onDevelopmentRunCreated?: (runId: number) => void;
+  onDevelopmentRunCancelled?: (runId: number) => Promise<void>;
+  onDevelopmentRunCleanup?: (runId: number) => Promise<void>;
+  listDevelopmentRepositories?: () => Promise<readonly DevelopmentRepository[]>;
+  resolveDevelopmentRepository?: (repository: string) => Promise<
+    | {
+        baseSha: string;
+        cloneUrl: string;
+        defaultBranch: string;
+        installationId: number;
+        repositoryId: number;
+      }
+    | undefined
+  >;
+  listDevelopmentTickets?: () => Promise<readonly DevelopmentTicket[]>;
+  importDevelopmentTicket?: (id: string) => Promise<DevelopmentTicketImport>;
+  onDevelopmentClarificationAnswer?: (input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    answers: Record<string, string[]>;
+  }) => void;
+  onDevelopmentPlanApproval?: (input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    approve: boolean;
+    response?: string;
+  }) => void;
+  onDevelopmentPublicationApproval?: (input: {
+    runId: number;
+    interruptId: number;
+    interruptLockVersion: number;
+    candidateHash: string;
+    approve: boolean;
+    response?: string;
+  }) => void;
   /** Optional bounded context adapter. It must never return credentials or an entire diff. */
   getFindingContext?: (input: {
     repository: string;
