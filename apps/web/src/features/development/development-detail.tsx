@@ -161,7 +161,7 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
   })();
 
   return (
-    <div className="-my-6 flex h-[calc(100svh-3.5rem)] min-h-[48rem] min-w-0 flex-col">
+    <div className="-my-6 flex h-[calc(100svh-4.5rem)] min-h-[48rem] min-w-0 flex-col lg:h-[calc(100svh-5.5rem)]">
       <DevelopmentRunHeader
         detail={detail}
         pendingAction={pendingRunAction}
