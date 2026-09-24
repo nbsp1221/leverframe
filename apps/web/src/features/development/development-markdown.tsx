@@ -22,6 +22,11 @@ const components: Components = {
   code: ({ children }) => (
     <code className="rounded bg-surface-subtle px-1 py-0.5 font-mono text-xs">{children}</code>
   ),
+  img: ({ src, alt }) => (
+    <code className="rounded bg-surface-subtle px-1 py-0.5 font-mono text-xs">
+      {`![${alt ?? ''}](${typeof src === 'string' ? src : ''})`}
+    </code>
+  ),
   a: ({ href, children }) =>
     href?.startsWith('https://') || href?.startsWith('http://') ? (
       <a
@@ -40,11 +45,10 @@ const components: Components = {
 };
 
 export function DevelopmentMarkdown({ children }: { children: string }) {
-  const readableMarkdown = children.replace(/([.!?…”’])\*\*(?=[\p{L}\p{N}])/gu, '$1** ');
   return (
     <div className="flex min-w-0 flex-col gap-3 break-words">
       <Markdown remarkPlugins={[remarkGfm]} components={components}>
-        {readableMarkdown}
+        {children}
       </Markdown>
     </div>
   );
