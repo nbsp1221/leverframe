@@ -13,7 +13,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@repo/ui/components/alert-dialog';
-import { Badge } from '@repo/ui/components/badge';
 import { Button } from '@repo/ui/components/button';
 import {
   Card,
@@ -43,7 +42,11 @@ import { Spinner } from '@repo/ui/components/spinner';
 import { Textarea } from '@repo/ui/components/textarea';
 import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, PanelRightIcon, XIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { PageFrame } from '../../components/page-frame';
+import { PageSurface } from '../../components/page-surface';
+import { StatusSignal } from '../../components/status-signal';
 import { Link, useRouter } from '../../i18n/navigation';
 import { DevelopmentRunOverview } from './development-run-overview';
 import { DevelopmentActivity, DevelopmentWorkflowOverview } from './development-run-presentation';
@@ -161,31 +164,47 @@ export function DevelopmentDetailView({ detail }: { detail: DevelopmentRunDetail
   })();
 
   return (
-    <div className="-my-6 flex h-[calc(100svh-4.5rem)] min-h-[48rem] min-w-0 flex-col lg:h-[calc(100svh-5.5rem)]">
+    <PageFrame className="flex flex-col gap-6">
       <DevelopmentRunHeader
         detail={detail}
         pendingAction={pendingRunAction}
         onAction={(action) => void runAction(action)}
       />
-      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-4 sm:px-6 lg:px-8">
-        {runActionError === undefined ? null : (
-          <Alert variant="destructive" className="mt-4 shrink-0">
-            <AlertTitle>{runActionError}</AlertTitle>
-          </Alert>
-        )}
-        <DevelopmentWorkflowOverview detail={detail} />
-        <Separator />
-        <div className="mx-auto flex min-h-0 w-full max-w-[800px] flex-1 flex-col pt-4">
-          <DevelopmentActivity events={detail.events} />
-          {interrupt === null ? null : (
-            <section aria-label={t('actionRequired')} className="shrink-0 pt-3 pb-2">
-              <Separator className="mb-4" />
-              {interrupt}
-            </section>
-          )}
+      {runActionError === undefined ? null : (
+        <Alert variant="destructive">
+          <AlertTitle>{runActionError}</AlertTitle>
+        </Alert>
+      )}
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="min-w-0">
+          <PageSurface>
+            <div className="px-5 sm:px-6">
+              <DevelopmentWorkflowOverview detail={detail} />
+            </div>
+            <Separator />
+            <div className="flex h-[min(60svh,42rem)] min-h-96 flex-col px-5 py-5 sm:px-6 sm:py-6">
+              <DevelopmentActivity events={detail.events} />
+            </div>
+          </PageSurface>
         </div>
+        <aside
+          className="flex min-w-0 flex-col gap-5 xl:sticky xl:top-20 xl:self-start"
+          aria-label={t('runDetails')}
+        >
+          {interrupt === null ? null : (
+            <section aria-label={t('actionRequired')}>{interrupt}</section>
+          )}
+          <PageSurface className="hidden p-5 xl:block">
+            <h2 className="text-base font-bold">{t('runInfo')}</h2>
+            <dl className="mt-3 divide-y divide-border/70 text-sm">
+              <RunFact label={t('repository')} value={detail.run.repository} />
+              <RunFact label={t('status')} value={t(`phase_${detail.run.phase}`)} />
+              <RunFact label={t('run')} value={`#${detail.run.id}`} />
+            </dl>
+          </PageSurface>
+        </aside>
       </div>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -199,74 +218,91 @@ function DevelopmentRunHeader({
   onAction: (action: 'cancel' | 'cleanup') => void;
 }) {
   const t = useTranslations('development');
+  const searchParams = useSearchParams();
   const goalSummary = summarizeGoal(detail.run.goal);
+  const tone =
+    detail.run.operator_action !== null
+      ? 'warning'
+      : detail.run.phase === 'completed'
+        ? 'success'
+        : detail.run.phase === 'failed'
+          ? 'danger'
+          : detail.run.phase === 'cancelled'
+            ? 'muted'
+            : 'info';
 
   return (
-    <header className="-mx-4 flex min-h-12 min-w-0 items-center gap-2 border-b px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        nativeButton={false}
-        aria-label={t('back')}
-        render={<Link href="/development" />}
-      >
-        <ArrowLeftIcon aria-hidden="true" />
-      </Button>
-      <span className="shrink-0 text-xs text-muted-foreground">
-        <span className="hidden sm:inline">{t('run')} </span>#{detail.run.id}
-      </span>
-      <h1 className="truncate text-sm font-medium" title={detail.run.goal}>
-        {goalSummary}
-      </h1>
-      <Badge className="hidden shrink-0 sm:inline-flex" variant="secondary">
-        {t(`phase_${detail.run.phase}`)}
-      </Badge>
-      <span
-        className="hidden max-w-48 truncate text-xs text-muted-foreground md:inline"
-        title={detail.run.repository}
-      >
-        {detail.run.repository}
-      </span>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        <Sheet>
-          <SheetTrigger render={<Button type="button" variant="outline" size="sm" />}>
-            <PanelRightIcon data-icon="inline-start" aria-hidden="true" />
-            {t('details')}
-          </SheetTrigger>
-          <SheetContent
-            showCloseButton={false}
-            className="gap-0 p-0 data-[side=right]:w-full sm:data-[side=right]:max-w-sm"
-          >
-            <SheetHeader className="border-b">
-              <SheetTitle>{t('runDetails')}</SheetTitle>
-              <SheetDescription>{t('runDetailsDescription')}</SheetDescription>
-            </SheetHeader>
-            <SheetClose
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="absolute top-3 right-3"
-                  aria-label={t('closeDetails')}
-                />
-              }
+    <header className="flex min-w-0 flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link
+          href={`/development${searchParams.size ? `?${searchParams.toString()}` : ''}`}
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeftIcon aria-hidden="true" className="size-4" />
+          {t('back')}
+        </Link>
+        <div className="flex items-center gap-2">
+          <Sheet>
+            <SheetTrigger render={<Button type="button" variant="outline" size="sm" />}>
+              <PanelRightIcon data-icon="inline-start" aria-hidden="true" />
+              {t('details')}
+            </SheetTrigger>
+            <SheetContent
+              showCloseButton={false}
+              className="gap-0 p-0 data-[side=right]:w-full sm:data-[side=right]:max-w-sm"
             >
-              <XIcon aria-hidden="true" />
-            </SheetClose>
-            <div
-              className="min-h-0 overflow-y-auto px-2 pb-4"
-              tabIndex={0}
-              role="region"
-              aria-label={t('runDetailsContent')}
-            >
-              <DevelopmentRunOverview detail={detail} />
-            </div>
-          </SheetContent>
-        </Sheet>
-        <RunResourceActions detail={detail} pendingAction={pendingAction} onAction={onAction} />
+              <SheetHeader className="border-b">
+                <SheetTitle>{t('runDetails')}</SheetTitle>
+                <SheetDescription>{t('runDetailsDescription')}</SheetDescription>
+              </SheetHeader>
+              <SheetClose
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-3 right-3"
+                    aria-label={t('closeDetails')}
+                  />
+                }
+              >
+                <XIcon aria-hidden="true" />
+              </SheetClose>
+              <div
+                className="min-h-0 overflow-y-auto px-2 pb-4"
+                tabIndex={0}
+                role="region"
+                aria-label={t('runDetailsContent')}
+              >
+                <DevelopmentRunOverview detail={detail} />
+              </div>
+            </SheetContent>
+          </Sheet>
+          <RunResourceActions detail={detail} pendingAction={pendingAction} onAction={onAction} />
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 border-b border-border pb-5">
+        <p className="text-sm text-muted-foreground">
+          {detail.run.repository} · {t('run')} #{detail.run.id}
+        </p>
+        <h1
+          className="max-w-5xl break-words text-2xl font-bold tracking-[-0.04em] sm:text-3xl"
+          title={detail.run.goal}
+        >
+          {goalSummary}
+        </h1>
+        <StatusSignal tone={tone}>{t(`phase_${detail.run.phase}`)}</StatusSignal>
       </div>
     </header>
+  );
+}
+
+function RunFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 items-start justify-between gap-3 py-3 first:pt-0 last:pb-0">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-all text-right font-medium">{value}</dd>
+    </div>
   );
 }
 
@@ -384,9 +420,9 @@ function PlanApprovalAction({
 
   return (
     <form action={approvePlan}>
-      <Card size="sm">
+      <Card className="rounded-2xl border border-border/75 bg-surface shadow-sm shadow-foreground/[0.025]">
         <CardHeader>
-          <CardTitle>{t('approvePlan')}</CardTitle>
+          <CardTitle className="text-lg font-bold">{t('approvePlan')}</CardTitle>
           <CardDescription>{t('approvePlanDescription')}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -413,7 +449,7 @@ function PlanApprovalAction({
             </Alert>
           ) : null}
         </CardContent>
-        <CardFooter className="justify-end">
+        <CardFooter className="justify-end bg-surface">
           <Button type="submit" disabled={pending}>
             {pending ? <Spinner data-icon="inline-start" /> : null}
             {t('approveAndImplement')}
@@ -437,9 +473,9 @@ function PublicationApprovalAction({
 }) {
   const t = useTranslations('development');
   return (
-    <Card size="sm">
+    <Card className="rounded-2xl border border-border/75 bg-surface shadow-sm shadow-foreground/[0.025]">
       <CardHeader>
-        <CardTitle>{t('approvePublication')}</CardTitle>
+        <CardTitle className="text-lg font-bold">{t('approvePublication')}</CardTitle>
         <CardDescription>{t('approvePublicationDescription')}</CardDescription>
       </CardHeader>
       <CardContent>
@@ -454,7 +490,7 @@ function PublicationApprovalAction({
           </Alert>
         ) : null}
       </CardContent>
-      <CardFooter className="justify-end">
+      <CardFooter className="justify-end bg-surface">
         <Button
           onClick={() => void approvePublication()}
           disabled={pending || candidateHash === null}
@@ -514,9 +550,9 @@ function ClarificationAction({
 
   return (
     <form action={answer}>
-      <Card size="sm">
+      <Card className="rounded-2xl border border-border/75 bg-surface shadow-sm shadow-foreground/[0.025]">
         <CardHeader>
-          <CardTitle>{t('clarification')}</CardTitle>
+          <CardTitle className="text-lg font-bold">{t('clarification')}</CardTitle>
           <CardDescription>{t('clarificationDescription')}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -551,7 +587,7 @@ function ClarificationAction({
             ) : null}
           </FieldGroup>
         </CardContent>
-        <CardFooter className="justify-end">
+        <CardFooter className="justify-end bg-surface">
           <Button type="submit" disabled={pending}>
             {pending ? <Spinner data-icon="inline-start" /> : null}
             {t('sendAnswers')}

@@ -7,6 +7,7 @@ import { createColumnHelper } from '@tanstack/react-table';
 import { ExternalLinkIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
+import { StatusSignal as ProductStatusSignal } from '../../components/status-signal';
 import { Link } from '../../i18n/navigation';
 import { formatDuration } from './review-format';
 
@@ -124,18 +125,13 @@ export function columnClass(id: string) {
 export function StatusSignal({ status, t }: { status: string; t: Translation }) {
   const tone =
     status === 'completed'
-      ? 'text-success'
+      ? 'success'
       : status === 'running' || status === 'queued'
-        ? 'text-info'
+        ? 'info'
         : status === 'failed'
-          ? 'text-danger'
-          : 'text-muted-foreground';
-  return (
-    <span className={`inline-flex items-center gap-2 text-xs font-semibold ${tone}`}>
-      <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
-      {t(status)}
-    </span>
-  );
+          ? 'danger'
+          : 'muted';
+  return <ProductStatusSignal tone={tone}>{t(status)}</ProductStatusSignal>;
 }
 
 export function FindingSummary({ item, t }: { item: ReviewListItem; t: Translation }) {

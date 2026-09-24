@@ -41,6 +41,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { useQueryStates } from 'nuqs';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { PageSurface } from '../../components/page-surface';
 import { Link, usePathname, useRouter } from '../../i18n/navigation';
 import { reviewReturnQuery } from './review-detail-navigation';
 import { formatDuration } from './review-format';
@@ -152,7 +153,7 @@ export function ReviewList({ response, error = false, detailScenario }: ReviewLi
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/75 bg-surface shadow-sm shadow-foreground/[0.025]">
+    <PageSurface>
       <div className="border-b border-border/70 px-5 pt-5 pb-4 sm:px-6 sm:pt-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -318,7 +319,7 @@ export function ReviewList({ response, error = false, detailScenario }: ReviewLi
           searchParams={searchParams}
         />
       </div>
-    </section>
+    </PageSurface>
   );
 }
 

@@ -1,7 +1,6 @@
 'use client';
 
 import type { DevelopmentEvent, DevelopmentRunDetail } from '@repo/contracts';
-import { Badge } from '@repo/ui/components/badge';
 import { Button } from '@repo/ui/components/button';
 import {
   Collapsible,
@@ -28,6 +27,8 @@ import {
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useId, useState } from 'react';
+import { StatusSignal } from '../../components/status-signal';
+import { DevelopmentMarkdown } from './development-markdown';
 import { normalizeWorkspacePaths } from './development-message';
 
 const workflowMilestones = [
@@ -53,19 +54,30 @@ export function DevelopmentWorkflowOverview({ detail }: { detail: DevelopmentRun
   const completed = detail.run.phase === 'completed';
 
   return (
-    <section className="shrink-0 py-4" aria-labelledby={titleId}>
+    <section className="shrink-0 py-5" aria-labelledby={titleId}>
       <div className="mb-4 flex items-center justify-between gap-4">
         <div>
-          <h2 id={titleId} className="text-sm font-medium">
+          <h2 id={titleId} className="text-xl font-bold tracking-[-0.025em]">
             {t('graph')}
           </h2>
-          <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">
-            {t('graphDescription')}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('graphDescription')}</p>
         </div>
-        <Badge variant="secondary" className="shrink-0">
+        <StatusSignal
+          tone={
+            detail.run.operator_action !== null
+              ? 'warning'
+              : detail.run.phase === 'failed'
+                ? 'danger'
+                : detail.run.phase === 'cancelled'
+                  ? 'muted'
+                  : completed
+                    ? 'success'
+                    : 'info'
+          }
+          className="shrink-0"
+        >
           {t(`phase_${detail.run.phase}`)}
-        </Badge>
+        </StatusSignal>
       </div>
       <ol className="grid gap-2 md:grid-cols-6 md:gap-0">
         {workflowMilestones.map((milestone, index) => {
@@ -136,11 +148,11 @@ export function DevelopmentActivity({ events }: { events: DevelopmentEvent[] }) 
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="mb-3 shrink-0">
-        <h2 id="agent-activity-title" className="text-sm font-medium">
+      <div className="mb-4 shrink-0">
+        <h2 id="agent-activity-title" className="text-xl font-bold tracking-[-0.025em]">
           {t('agentActivity')}
         </h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('agentActivityDescription')}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t('agentActivityDescription')}</p>
       </div>
       <MessageScrollerProvider defaultScrollPosition="end">
         <MessageScroller>
@@ -185,7 +197,7 @@ function ActivityMessage({
   const needsDisclosure = message.length > 600 || message.split('\n').length > 8;
 
   return (
-    <Message>
+    <Message className="border-b border-border/70 pb-5 last:border-b-0">
       <MessageContent>
         <MessageHeader className="gap-2 px-0">
           <span>{t(`source_${event.source}`)}</span>
@@ -193,10 +205,12 @@ function ActivityMessage({
         {needsDisclosure ? (
           <Collapsible open={open} onOpenChange={setOpen}>
             {open ? null : (
-              <p className="line-clamp-5 whitespace-pre-wrap text-sm leading-6">{message}</p>
+              <div className="line-clamp-5">
+                <DevelopmentMarkdown>{message}</DevelopmentMarkdown>
+              </div>
             )}
             <CollapsibleContent>
-              <p className="whitespace-pre-wrap text-sm leading-6">{message}</p>
+              <DevelopmentMarkdown>{message}</DevelopmentMarkdown>
             </CollapsibleContent>
             <CollapsibleTrigger
               render={<Button type="button" variant="link" size="sm" className="mt-1 px-0" />}
@@ -210,7 +224,7 @@ function ActivityMessage({
             </CollapsibleTrigger>
           </Collapsible>
         ) : (
-          <p className="whitespace-pre-wrap text-sm leading-6">{message}</p>
+          <DevelopmentMarkdown>{message}</DevelopmentMarkdown>
         )}
         <MessageFooter className="px-0">
           <time dateTime={event.observed_at}>{dateTime.format(new Date(event.observed_at))}</time>

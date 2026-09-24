@@ -70,6 +70,33 @@ test.describe('frontend invariants', () => {
     expect(detailWidth).toBe(inboxWidth);
   });
 
+  test('review and development lists share the product frame and title scale', async ({ page }) => {
+    await page.goto('/en/reviews?fixture=default');
+    const reviewFrame = await page
+      .locator('[data-slot="review-page-frame"]')
+      .evaluate((element) => Math.round(element.getBoundingClientRect().width));
+    const reviewTitle = await page
+      .getByRole('heading', { name: 'Reviews', level: 1 })
+      .evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { fontSize: style.fontSize, fontWeight: style.fontWeight };
+      });
+
+    await page.goto('/en/development');
+    const developmentFrame = await page
+      .locator('[data-slot="page-frame"]')
+      .evaluate((element) => Math.round(element.getBoundingClientRect().width));
+    const developmentTitle = await page
+      .getByRole('heading', { name: 'Agent development', level: 1 })
+      .evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { fontSize: style.fontSize, fontWeight: style.fontWeight };
+      });
+
+    expect(developmentFrame).toBe(reviewFrame);
+    expect(developmentTitle).toEqual(reviewTitle);
+  });
+
   for (const fixture of representativeFixtures) {
     test(`${fixture} renders without hydration, page, or same-origin resource failures`, async ({
       page,
