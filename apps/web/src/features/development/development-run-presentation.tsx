@@ -25,8 +25,9 @@ import {
   CircleIcon,
   CircleStopIcon,
 } from 'lucide-react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { useId, useState } from 'react';
+import { LocalTime } from '../../components/local-time';
 import { StatusSignal } from '../../components/status-signal';
 import { DevelopmentMarkdown } from './development-markdown';
 import { normalizeWorkspacePaths } from './development-message';
@@ -137,8 +138,6 @@ export function DevelopmentWorkflowOverview({ detail }: { detail: DevelopmentRun
 
 export function DevelopmentActivity({ events }: { events: DevelopmentEvent[] }) {
   const t = useTranslations('development');
-  const locale = useLocale();
-  const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
   const messageEvents = events.filter(
     (event) => typeof event.payload.message === 'string' && event.payload.message.trim() !== '',
   );
@@ -165,12 +164,12 @@ export function DevelopmentActivity({ events }: { events: DevelopmentEvent[] }) 
               ) : (
                 messageEvents.map((event) => (
                   <MessageScrollerItem key={event.sequence} messageId={`event-${event.sequence}`}>
-                    <ActivityMessage event={event} dateTime={dateTime} />
+                    <ActivityMessage event={event} />
                   </MessageScrollerItem>
                 ))
               )}
               <MessageScrollerItem messageId="lifecycle" scrollAnchor>
-                <LifecycleHistory events={lifecycleEvents} dateTime={dateTime} />
+                <LifecycleHistory events={lifecycleEvents} />
               </MessageScrollerItem>
             </MessageScrollerContent>
           </MessageScrollerViewport>
@@ -184,13 +183,7 @@ export function DevelopmentActivity({ events }: { events: DevelopmentEvent[] }) 
   );
 }
 
-function ActivityMessage({
-  event,
-  dateTime,
-}: {
-  event: DevelopmentEvent;
-  dateTime: Intl.DateTimeFormat;
-}) {
+function ActivityMessage({ event }: { event: DevelopmentEvent }) {
   const t = useTranslations('development');
   const [open, setOpen] = useState(false);
   const message = normalizeWorkspacePaths(String(event.payload.message));
@@ -227,20 +220,14 @@ function ActivityMessage({
           <DevelopmentMarkdown>{message}</DevelopmentMarkdown>
         )}
         <MessageFooter className="px-0">
-          <time dateTime={event.observed_at}>{dateTime.format(new Date(event.observed_at))}</time>
+          <LocalTime value={event.observed_at} />
         </MessageFooter>
       </MessageContent>
     </Message>
   );
 }
 
-function LifecycleHistory({
-  events,
-  dateTime,
-}: {
-  events: DevelopmentEvent[];
-  dateTime: Intl.DateTimeFormat;
-}) {
+function LifecycleHistory({ events }: { events: DevelopmentEvent[] }) {
   const t = useTranslations('development');
   const [open, setOpen] = useState(false);
   if (events.length === 0) {
@@ -269,9 +256,7 @@ function LifecycleHistory({
               className="flex flex-wrap items-baseline justify-between gap-2 text-sm"
             >
               <span>{event.type.replaceAll('_', ' ')}</span>
-              <time className="text-xs text-muted-foreground" dateTime={event.observed_at}>
-                {dateTime.format(new Date(event.observed_at))}
-              </time>
+              <LocalTime className="text-xs text-muted-foreground" value={event.observed_at} />
             </li>
           ))}
         </ol>

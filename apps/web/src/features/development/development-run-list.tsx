@@ -15,6 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from '@repo/ui/components/toggle-group';
 import { SearchIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringLiteral, useQueryStates } from 'nuqs';
+import { LocalTime } from '../../components/local-time';
 import { PageSurface } from '../../components/page-surface';
 import { StatusSignal } from '../../components/status-signal';
 import { Link } from '../../i18n/navigation';
@@ -37,7 +38,6 @@ export function DevelopmentRunList({ runs }: { runs: DevelopmentRunSummary[] | n
     ...(filter === 'all' ? {} : { view: filter }),
     ...(query ? { query } : {}),
   }).toString();
-  const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
   const normalizedQuery = query.trim().toLocaleLowerCase(locale);
   const visibleRuns = runs?.filter((run) => {
     const matchesFilter =
@@ -155,7 +155,7 @@ export function DevelopmentRunList({ runs }: { runs: DevelopmentRunSummary[] | n
                       {run.repository}
                     </TableCell>
                     <TableCell className="pr-5 text-right text-sm text-muted-foreground sm:pr-6">
-                      {dateTime.format(new Date(run.last_activity_at))}
+                      <LocalTime value={run.last_activity_at} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -179,7 +179,7 @@ export function DevelopmentRunList({ runs }: { runs: DevelopmentRunSummary[] | n
                 <span className="flex min-w-0 items-center justify-between gap-3 text-xs text-muted-foreground">
                   <span className="truncate">{run.repository}</span>
                   <span className="shrink-0">
-                    {dateTime.format(new Date(run.last_activity_at))}
+                    <LocalTime value={run.last_activity_at} />
                   </span>
                 </span>
               </Link>
