@@ -39,9 +39,9 @@ export function sandboxCreateArguments(input: {
 
 export async function inspectSandboxRuntime(
   template: string,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; statusTimeoutMilliseconds?: number } = {},
 ): Promise<SandboxRuntimeIdentity> {
-  const cancellation = signal === undefined ? {} : { signal };
+  const cancellation = options.signal === undefined ? {} : { signal: options.signal };
   const version = await runProcess('sbx', ['version'], {
     ...cancellation,
     timeoutMilliseconds: 5_000,
@@ -50,14 +50,16 @@ export async function inspectSandboxRuntime(
   assertSupportedSbxVersion(cliVersion);
   await runProcess('sbx', ['daemon', 'status'], {
     ...cancellation,
-    timeoutMilliseconds: 5_000,
+    // This deadline includes CLI initialization, not just the daemon response.
+    // Allow cold-boot startup more time than an interactive health probe.
+    timeoutMilliseconds: options.statusTimeoutMilliseconds ?? 30_000,
   });
   return { cliVersion, template };
 }
 
 export async function sandboxRuntimeAvailable(template: string): Promise<boolean> {
   try {
-    await inspectSandboxRuntime(template);
+    await inspectSandboxRuntime(template, { statusTimeoutMilliseconds: 5_000 });
     return true;
   } catch {
     return false;
@@ -69,7 +71,7 @@ export async function preflightSandboxRuntime(
   hostVisibleWorkspaceRoot: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const identity = await inspectSandboxRuntime(template, signal);
+  const identity = await inspectSandboxRuntime(template, signal === undefined ? {} : { signal });
   mkdirSync(hostVisibleWorkspaceRoot, { recursive: true, mode: 0o700 });
   const workspace = mkdtempSync(join(hostVisibleWorkspaceRoot, '.sandbox-preflight-'));
   const name = `leverframe-preflight-${randomUUID().slice(0, 12)}`;

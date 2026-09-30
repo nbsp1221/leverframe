@@ -2,6 +2,40 @@ import { describe, expect, it, vi } from 'vitest';
 import { startReviewWorkerWhenReady } from '../../../src/jobs/review-worker-startup.js';
 
 describe('review worker startup', () => {
+  it('recovers after a sustained outage without exhausting retries or starting twice', async () => {
+    let attempts = 0;
+    const preflight = vi.fn(() => {
+      attempts += 1;
+      if (attempts <= 10) {
+        return Promise.reject(new Error('sandbox daemon unavailable'));
+      }
+      return Promise.resolve('sandbox ready');
+    });
+    const startWorker = vi.fn();
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const successLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      const startup = startReviewWorkerWhenReady({
+        preflight,
+        startWorker,
+        signal: new AbortController().signal,
+        retryDelayMilliseconds: () => 1,
+      });
+      await startup;
+
+      expect(preflight).toHaveBeenCalledTimes(11);
+      expect(startWorker).toHaveBeenCalledOnce();
+      expect(errorLog).toHaveBeenLastCalledWith(
+        'sandbox preflight failed (attempt 10); retrying review worker startup in 1ms',
+        expect.any(Error),
+      );
+    } finally {
+      errorLog.mockRestore();
+      successLog.mockRestore();
+    }
+  });
+
   it('starts the worker after a failed preflight recovers', async () => {
     const preflight = vi
       .fn<(_: AbortSignal) => Promise<string>>()

@@ -20,13 +20,16 @@ export async function startReviewWorkerWhenReady(input: {
         return;
       }
       failures += 1;
-      console.error('sandbox preflight failed; retrying review worker startup', error);
       const delay =
         input.retryDelayMilliseconds?.(failures) ??
         Math.min(
           maximumRetryDelayMilliseconds,
           initialRetryDelayMilliseconds * 2 ** (failures - 1),
         );
+      console.error(
+        `sandbox preflight failed (attempt ${failures}); retrying review worker startup in ${delay}ms`,
+        error,
+      );
       try {
         await setTimeout(delay, undefined, { signal: input.signal });
       } catch (error) {
