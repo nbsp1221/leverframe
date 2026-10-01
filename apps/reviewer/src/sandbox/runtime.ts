@@ -37,17 +37,29 @@ export function sandboxCreateArguments(input: {
   ];
 }
 
-export async function inspectSandboxRuntime(template: string): Promise<SandboxRuntimeIdentity> {
-  const version = await runProcess('sbx', ['version'], { timeoutMilliseconds: 5_000 });
+export async function inspectSandboxRuntime(
+  template: string,
+  options: { signal?: AbortSignal; statusTimeoutMilliseconds?: number } = {},
+): Promise<SandboxRuntimeIdentity> {
+  const cancellation = options.signal === undefined ? {} : { signal: options.signal };
+  const version = await runProcess('sbx', ['version'], {
+    ...cancellation,
+    timeoutMilliseconds: 5_000,
+  });
   const cliVersion = parseSbxVersion(version.stdout);
   assertSupportedSbxVersion(cliVersion);
-  await runProcess('sbx', ['daemon', 'status'], { timeoutMilliseconds: 5_000 });
+  await runProcess('sbx', ['daemon', 'status'], {
+    ...cancellation,
+    // This deadline includes CLI initialization, not just the daemon response.
+    // Allow cold-boot startup more time than an interactive health probe.
+    timeoutMilliseconds: options.statusTimeoutMilliseconds ?? 30_000,
+  });
   return { cliVersion, template };
 }
 
 export async function sandboxRuntimeAvailable(template: string): Promise<boolean> {
   try {
-    await inspectSandboxRuntime(template);
+    await inspectSandboxRuntime(template, { statusTimeoutMilliseconds: 5_000 });
     return true;
   } catch {
     return false;
@@ -57,8 +69,9 @@ export async function sandboxRuntimeAvailable(template: string): Promise<boolean
 export async function preflightSandboxRuntime(
   template: string,
   hostVisibleWorkspaceRoot: string,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const identity = await inspectSandboxRuntime(template);
+  const identity = await inspectSandboxRuntime(template, signal === undefined ? {} : { signal });
   mkdirSync(hostVisibleWorkspaceRoot, { recursive: true, mode: 0o700 });
   const workspace = mkdtempSync(join(hostVisibleWorkspaceRoot, '.sandbox-preflight-'));
   const name = `leverframe-preflight-${randomUUID().slice(0, 12)}`;
@@ -73,10 +86,10 @@ export async function preflightSandboxRuntime(
         cpus: 2,
         memory: '4g',
       }),
-      { timeoutMilliseconds: 5 * 60 * 1000 },
+      { ...(signal === undefined ? {} : { signal }), timeoutMilliseconds: 5 * 60 * 1000 },
     );
     created = true;
-    const evidence = await probeSandboxEnvironment(name);
+    const evidence = await probeSandboxEnvironment(name, signal);
     return `template=${identity.template}\nsbx=${identity.cliVersion}\n${evidence}`;
   } finally {
     try {

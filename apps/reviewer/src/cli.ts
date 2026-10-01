@@ -9,6 +9,7 @@ import { GitHubAppClient } from './github/client.js';
 import { CredentialStore } from './github/credentials.js';
 import { ManualCommandHandler } from './jobs/command-handler.js';
 import { JobDatabase } from './jobs/database.js';
+import { startReviewWorkerWhenReady } from './jobs/review-worker-startup.js';
 import { ThreadSideEffectWorker } from './jobs/thread-side-effect-worker.js';
 import { ReviewWorker } from './jobs/worker.js';
 import { DevelopmentSandboxManager } from './sandbox/development.js';
@@ -241,12 +242,15 @@ function serve(): void {
   );
 
   let shuttingDown = false;
+  const startupAbort = new AbortController();
+  let startupPromise: Promise<void> | undefined;
 
   const shutdown = () => {
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
+    startupAbort.abort();
 
     // Stop accepting new requests first. SSE streams can remain open for an
     // entire run, so close active connections after workers have stopped.
@@ -262,6 +266,7 @@ function serve(): void {
     void (async () => {
       try {
         await Promise.all([
+          startupPromise,
           worker.stop(),
           threadWorker.stop(),
           developmentController.stop(),
@@ -284,8 +289,11 @@ function serve(): void {
 
   server.listen(config.port, config.host, () => {
     console.log(`Leverframe listening on http://${config.host}:${config.port}`);
-    void (async () => {
+    startupPromise = (async () => {
       await developmentController.recover();
+      if (startupAbort.signal.aborted) {
+        return;
+      }
       ticketProjectionWorker?.start();
       await startWorkersAfterRecovery(
         config.sandboxTemplate,
@@ -293,6 +301,7 @@ function serve(): void {
         database,
         worker,
         threadWorker,
+        startupAbort.signal,
       );
     })().catch((error: unknown) => {
       console.error('startup recovery failed; workers were not started', error);
@@ -306,7 +315,11 @@ async function startWorkersAfterRecovery(
   database: JobDatabase,
   worker: ReviewWorker,
   threadWorker: ThreadSideEffectWorker,
+  signal: AbortSignal,
 ): Promise<void> {
+  if (signal.aborted) {
+    return;
+  }
   try {
     const removed = await recoverOrphanSandboxes(database.getActiveJobIds());
     if (removed.length > 0) {
@@ -315,14 +328,16 @@ async function startWorkersAfterRecovery(
   } catch (error) {
     console.warn('orphan review sandbox recovery failed; continuing startup', error);
   }
-  threadWorker.start();
-  try {
-    const evidence = await preflightSandboxRuntime(sandboxTemplate, jobsDirectory);
-    console.log(`sandbox preflight passed\n${evidence}`);
-    worker.start();
-  } catch (error) {
-    console.error('sandbox preflight failed; review worker was not started', error);
+  if (signal.aborted) {
+    return;
   }
+  threadWorker.start();
+  await startReviewWorkerWhenReady({
+    preflight: (attemptSignal) =>
+      preflightSandboxRuntime(sandboxTemplate, jobsDirectory, attemptSignal),
+    startWorker: () => worker.start(),
+    signal,
+  });
 }
 
 const entrypoint = process.argv[1];
