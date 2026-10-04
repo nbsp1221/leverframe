@@ -5,9 +5,12 @@ export interface CodexRpc {
 }
 
 /** Connects to the existing Desktop daemon; never starts or takes over a Codex runtime. */
-export class CodexSocketRpc implements CodexRpc {
+export class CodexObserverRpc implements CodexRpc {
   constructor(private readonly socketPath: string) {}
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (!['thread/read', 'thread/loaded/list'].includes(method)) {
+      throw new Error('observer_is_read_only');
+    }
     return new Promise((resolve, reject) => {
       let settled = false;
       const socket = new WebSocket(`ws+unix://${this.socketPath}:/`, {

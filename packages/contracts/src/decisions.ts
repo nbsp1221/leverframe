@@ -38,6 +38,7 @@ export const decisionSchema = z.object({
   constraints: z.array(z.string()).default([]),
   snoozedUntil: z.string().datetime().nullable().default(null),
   context: z.object({
+    connectionId: z.string().min(1).optional(),
     agentId: z.string(),
     threadId: z.string(),
     taskId: z.string(),
@@ -50,6 +51,7 @@ export const decisionSchema = z.object({
   recommendation: z.string(),
   recommendationUnavailableReason: z.string().trim().min(1).max(4000).optional(),
   status: decisionStatusSchema,
+  deliveryIssue: z.enum(['offline', 'busy', 'unsupported', 'unconfirmed']).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   answers: z.array(
@@ -106,13 +108,20 @@ export const decisionCreateSchema = decisionSchema
   })
   .extend({
     key: z.string().min(1).max(100),
-    threadId: z.string().uuid(),
+    threadId: z.string().uuid().optional(),
+    source: z
+      .object({ connectionId: z.string().min(1).max(100), sessionId: z.string().min(1).max(200) })
+      .strict()
+      .optional(),
     project: z.string().trim().min(1).max(100),
     title: z.string().trim().min(1).max(200),
     question: z.string().trim().min(1).max(4000),
     why: z.string().trim().min(1).max(4000),
   })
   .strict()
+  .refine((value) => Boolean(value.threadId) !== Boolean(value.source), {
+    message: 'Provide either source or the legacy threadId',
+  })
   .superRefine((value, context) => {
     const count = value.options.filter((option) => option.recommended).length;
     if (count === 1 && value.recommendation.trim() && !value.recommendationUnavailableReason) {

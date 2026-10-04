@@ -29,7 +29,7 @@ const errors = {
 
 export interface DecisionRegistration {
   token: string;
-  resolve: (threadId: string) => Promise<Decision['context']>;
+  resolve: (sessionId: string, connectionId?: string) => Promise<Decision['context']>;
 }
 
 export function registerDecisionRoutes(

@@ -138,7 +138,9 @@ export function DecisionDetail({
         <Alert>
           <AlertTitle>{t(`next.${item.status}`)}</AlertTitle>
           <AlertDescription>
-            {t(`explanation.${item.status}`)}
+            {item.status === 'delivery_failed' && item.deliveryIssue
+              ? t(`deliveryIssue.${item.deliveryIssue}`)
+              : t(`explanation.${item.status}`)}
             {item.status === 'delivery_failed' && (
               <Button
                 variant="outline"
@@ -149,7 +151,11 @@ export function DecisionDetail({
                 }}
               >
                 <RotateCwIcon data-icon="inline-start" />
-                {busy ? t('sending') : t('retry')}
+                {busy
+                  ? t('sending')
+                  : item.deliveryIssue === 'unconfirmed'
+                    ? t('checkReceipt')
+                    : t('retry')}
               </Button>
             )}
           </AlertDescription>

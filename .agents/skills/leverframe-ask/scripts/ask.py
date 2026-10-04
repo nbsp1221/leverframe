@@ -49,9 +49,9 @@ The script supplies key and threadId. It cannot submit answers on the user's beh
     parser.add_argument('--key', required=True, help='Stable identity for this question, reused on retries')
     parser.add_argument('--file', required=True, help='Question JSON file')
     args = parser.parse_args()
-    thread = os.environ.get('CODEX_THREAD_ID')
+    thread = os.environ.get('LEVERFRAME_SESSION_ID') or os.environ.get('CODEX_THREAD_ID')
     if not thread or not args.config:
-        parser.error('CODEX_THREAD_ID and a connection configuration are required')
+        parser.error('A session ID (LEVERFRAME_SESSION_ID or CODEX_THREAD_ID) and a connection configuration are required')
     try:
         config = json.loads(Path(args.config).read_text())
         base = config['url'].rstrip('/')
@@ -64,10 +64,14 @@ The script supplies key and threadId. It cannot submit answers on the user's beh
         if len(raw) > 48000:
             raise ValueError('question exceeds 48 KB')
         payload = json.loads(raw)
-        if not isinstance(payload, dict) or 'threadId' in payload or 'key' in payload:
-            raise ValueError('the script supplies key and threadId')
+        if not isinstance(payload, dict) or any(field in payload for field in ('threadId', 'source', 'key')):
+            raise ValueError('the script supplies key and session source')
         validate_recommendation(payload)
-        payload.update(key=args.key, threadId=thread)
+        payload.update(key=args.key)
+        if config.get('connectionId'):
+            payload['source'] = {'connectionId': config['connectionId'], 'sessionId': thread}
+        else:
+            payload['threadId'] = thread
         request = Request(base + '/api/v1/decisions', data=json.dumps(payload).encode(), headers={
             'Content-Type': 'application/json', 'Authorization': 'Bearer ' + config['token'],
         }, method='POST')

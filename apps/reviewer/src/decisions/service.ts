@@ -33,10 +33,16 @@ export class DecisionService {
 
   async create(
     input: DecisionCreate,
-    resolve: (threadId: string) => Promise<Decision['context']>,
+    resolve: (sessionId: string, connectionId?: string) => Promise<Decision['context']>,
   ): Promise<Decision> {
     const id = `dr-${createHash('sha256')
-      .update(JSON.stringify([input.threadId, input.key]))
+      .update(
+        JSON.stringify(
+          input.source
+            ? [input.source.connectionId, input.source.sessionId, input.key]
+            : [input.threadId, input.key],
+        ),
+      )
       .digest('hex')
       .slice(0, 32)}`;
     const hash = createHash('sha256').update(JSON.stringify(input)).digest('hex');
@@ -51,8 +57,11 @@ export class DecisionService {
     if (this.repository.get(id)) {
       return existing();
     }
-    const context = await resolve(input.threadId);
-    const { key: _key, threadId: _threadId, ...content } = input;
+    const context = await resolve(
+      input.source?.sessionId ?? input.threadId!,
+      input.source?.connectionId,
+    );
+    const { key: _key, threadId: _threadId, source: _source, ...content } = input;
     const at = this.now();
     const item: Decision = {
       ...content,
@@ -129,7 +138,10 @@ export class DecisionService {
     this.#dispatching.add(id);
     try {
       let item = this.get(id);
-      if (item.status !== 'queued') {
+      if (
+        item.status !== 'queued' &&
+        !(item.status === 'delivery_failed' && item.deliveryIssue !== 'unsupported')
+      ) {
         return;
       }
       const answer = item.answers.at(-1);
@@ -155,19 +167,34 @@ export class DecisionService {
           selectedOption: item.options.find((option) => option.id === answer.optionId),
         });
         item = this.get(id);
-        if (item.status === 'queued' && item.answers.at(-1)?.id === answer.id) {
-          this.update({ ...item, status: 'delivered' }, 'delivered', '');
+        if (
+          ['queued', 'delivery_failed'].includes(item.status) &&
+          item.answers.at(-1)?.id === answer.id
+        ) {
+          const { deliveryIssue: _issue, ...rest } = item;
+          this.update({ ...rest, status: 'delivered' }, 'delivered', '');
         }
       } catch (error) {
         item = this.get(id);
-        if (item.status !== 'queued' || item.answers.at(-1)?.id !== answer.id) {
+        if (
+          !['queued', 'delivery_failed'].includes(item.status) ||
+          item.answers.at(-1)?.id !== answer.id
+        ) {
           return;
         }
         const status =
           error instanceof AgentDeliveryError && error.reason === 'superseded'
             ? 'superseded'
             : 'delivery_failed';
-        this.update({ ...item, status }, status, '');
+        const issue =
+          status === 'superseded'
+            ? undefined
+            : error instanceof AgentDeliveryError && error.reason !== 'superseded'
+              ? error.reason
+              : 'offline';
+        if (item.status !== status || item.deliveryIssue !== issue) {
+          this.update({ ...item, status, deliveryIssue: issue }, status, '');
+        }
       }
     } finally {
       this.#dispatching.delete(id);

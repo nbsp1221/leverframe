@@ -21,6 +21,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentclientprotocol/codex-acp": "2.1.1",
+    "@agentclientprotocol/sdk": "1.5.0",
     "@hono/node-server": "2.1.1",
     "@hono/zod-openapi": "1.6.1",
     "@octokit/app": "16.1.4",

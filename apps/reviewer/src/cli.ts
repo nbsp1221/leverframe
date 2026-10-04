@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { type CAC, cac } from 'cac';
 import { loadServerConfig } from './app/config.js';
+import { createDecisionRuntime } from './app/decision-runtime.js';
 import { createLeverframeServer } from './app/server.js';
 import { DevelopmentController } from './development/controller.js';
 import { ExecutionTraceStore } from './execution/trace.js';
@@ -75,6 +76,9 @@ export function run(args: readonly string[], startServer: () => void = serve): n
 
 function serve(): void {
   const config = loadServerConfig();
+  const decisions = process.env.LEVERFRAME_DECISION_CONFIG
+    ? createDecisionRuntime(process.env.LEVERFRAME_DECISION_CONFIG)
+    : undefined;
   const credentials = new CredentialStore(config.credentialsDirectory);
   const dataRoot = config.jobsDirectory.replace(/[/\\]jobs$/, '');
   const database = new JobDatabase(config.databasePath, {
@@ -145,6 +149,9 @@ function serve(): void {
     database,
     credentials,
     {
+      ...(decisions
+        ? { decisions: decisions.service, decisionRegistration: decisions.registration }
+        : {}),
       isSandboxAvailable: () => sandboxRuntimeAvailable(config.sandboxTemplate),
       isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,
       onJobQueued: (job) => worker.cancelSuperseded(job),
@@ -271,6 +278,7 @@ function serve(): void {
           threadWorker.stop(),
           developmentController.stop(),
           ticketProjectionWorker?.stop(),
+          decisions?.close(),
         ]);
         server.closeAllConnections();
         await serverClosed;
@@ -288,6 +296,7 @@ function serve(): void {
   process.once('SIGTERM', shutdown);
 
   server.listen(config.port, config.host, () => {
+    decisions?.start();
     console.log(`Leverframe listening on http://${config.host}:${config.port}`);
     startupPromise = (async () => {
       await developmentController.recover();

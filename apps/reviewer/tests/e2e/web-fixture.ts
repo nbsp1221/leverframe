@@ -1,8 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
 import { createLeverframeServer } from '../../src/app/server.js';
 import { CredentialStore } from '../../src/github/credentials.js';
 import { JobDatabase } from '../../src/jobs/database.js';
@@ -11,17 +10,7 @@ import { createDecisionPreview } from '../fixtures/decision-runtime.js';
 const persistentRoot = process.env.LEVERFRAME_PREVIEW_ROOT;
 const root = persistentRoot ?? mkdtempSync(join(tmpdir(), 'leverframe-e2e-'));
 mkdirSync(root, { recursive: true });
-const connectionPath = process.env.LEVERFRAME_CODEX_CONFIG;
-const connection = connectionPath
-  ? z
-      .object({
-        socketPath: z.string().min(1),
-        token: z.string().min(32),
-        threads: z.record(z.string().uuid(), z.string().min(1)),
-      })
-      .parse(JSON.parse(readFileSync(connectionPath, 'utf8')))
-  : undefined;
-const decisionPreview = createDecisionPreview(join(root, 'decisions.sqlite'), connection);
+const decisionPreview = createDecisionPreview(join(root, 'decisions.sqlite'));
 const port = Number(process.env.LEVERFRAME_PREVIEW_PORT ?? '16722');
 const dataRoot = join(root, 'data');
 const credentialsDirectory = join(dataRoot, 'credentials');
@@ -101,7 +90,7 @@ const server = createLeverframeServer(
   },
   database,
   credentials,
-  { decisions: decisionPreview.service, decisionRegistration: decisionPreview.registration },
+  { decisions: decisionPreview.service },
 );
 
 server.listen(port, '127.0.0.1', () => {

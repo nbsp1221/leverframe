@@ -9,6 +9,18 @@ export interface DecisionRepository {
   replace(decision: Decision, expectedRevision: number): boolean;
 }
 
+/** Persistent outbox: reservation is never reset after an uncertain network call. */
+export interface DeliveryJournal {
+  deliveryReserved(id: string): boolean;
+  reserveDelivery(id: string, hash: string): boolean;
+  confirmDelivery(id: string): void;
+  deliveryConfirmed(id: string): boolean;
+  acquireSession(key: string, deliveryId: string): boolean;
+  releaseSession(key: string, deliveryId: string): void;
+}
+
+export type DeliveryIssue = 'offline' | 'busy' | 'unsupported' | 'unconfirmed';
+
 export interface AnswerDelivery {
   /** Stable across retries. Adapters must reconcile uncertain delivery before sending again. */
   id: string;
@@ -39,7 +51,7 @@ export interface AgentGateway {
 }
 
 export class AgentDeliveryError extends Error {
-  constructor(readonly reason: 'offline' | 'superseded') {
+  constructor(readonly reason: DeliveryIssue | 'superseded') {
     super(reason);
   }
 }

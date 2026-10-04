@@ -8,10 +8,11 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import { decisionCreateSchema, decisionSchema } from '@repo/contracts/decisions';
 import { execa } from 'execa';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { CodexRpc } from '../../src/decisions/codex-rpc.js';
+import type { CodexRpc } from '../../src/agent-connections/codex-observer-rpc.js';
 import type { AnswerDelivery } from '../../src/decisions/ports.js';
+import { CodexSessionObserver } from '../../src/agent-connections/codex-observer.js';
 import { registerDecisionRoutes } from '../../src/app/routes/decisions.js';
-import { CodexDecisionAgent, answerMessage } from '../../src/decisions/codex-agent.js';
+import { SessionDecisionGateway, answerMessage } from '../../src/decisions/delivery.js';
 import { DecisionService } from '../../src/decisions/service.js';
 import { SqliteDecisionRepository } from '../../src/decisions/sqlite-repository.js';
 
@@ -39,6 +40,34 @@ afterEach(() => {
     close();
   }
 });
+
+function gateway(rpc: CodexRpc, repository: SqliteDecisionRepository) {
+  const sessions = new Map([[threadId, '/test']]);
+  return new SessionDecisionGateway(
+    new Map([
+      [
+        'local-codex',
+        {
+          id: 'local-codex',
+          agentId: 'codex',
+          sessions,
+          observer: new CodexSessionObserver(rpc, sessions),
+          channel: {
+            prepare: () =>
+              Promise.resolve({
+                send: async (text) => {
+                  await rpc.call('turn/start', { input: [{ type: 'text', text }] });
+                },
+                close: async () => {},
+              }),
+          },
+        },
+      ],
+    ]),
+    repository,
+    'local-codex',
+  );
+}
 
 function fixture(path = ':memory:') {
   const repository = new SqliteDecisionRepository(path);
@@ -78,10 +107,13 @@ function fixture(path = ':memory:') {
       throw new Error('unexpected method');
     },
   };
-  const agent = new CodexDecisionAgent(rpc, repository, new Map([[threadId, '/test']]));
+  const agent = gateway(rpc, repository);
   const service = new DecisionService(repository, agent);
   const app = new OpenAPIHono();
-  registerDecisionRoutes(app, service, { token: 'test-token', resolve: (id) => agent.resolve(id) });
+  registerDecisionRoutes(app, service, {
+    token: 'test-token',
+    resolve: (id, connectionId) => agent.resolve(id, connectionId),
+  });
   return {
     repository,
     agent,
@@ -190,10 +222,7 @@ describe('Codex request boundary', () => {
     expect(f.service.get(item.id).status).toBe('delivery_failed');
     const second = new SqliteDecisionRepository(path);
     cleanup.push(() => second.close());
-    const recovered = new DecisionService(
-      second,
-      new CodexDecisionAgent(f.rpc, second, new Map([[threadId, '/test']])),
-    );
+    const recovered = new DecisionService(second, gateway(f.rpc, second));
     recovered.retry(item.id, recovered.get(item.id).revision);
     await recovered.dispatch(item.id);
     expect(recovered.get(item.id).status).toBe('delivered');
@@ -220,10 +249,7 @@ describe('Codex request boundary', () => {
     await f.service.dispatch(item.id);
     const reopened = new SqliteDecisionRepository(path);
     cleanup.push(() => reopened.close());
-    const service = new DecisionService(
-      reopened,
-      new CodexDecisionAgent(f.rpc, reopened, new Map([[threadId, '/test']])),
-    );
+    const service = new DecisionService(reopened, gateway(f.rpc, reopened));
     service.retry(item.id, service.get(item.id).revision);
     await service.dispatch(item.id);
     expect(f.starts()).toBe(1);
@@ -249,7 +275,7 @@ describe('Codex request boundary', () => {
     await f.service.dispatch(item.id);
     expect(f.service.get(item.id).status).toBe('superseded');
     expect(f.starts()).toBe(0);
-    await expect(f.agent.resolve('unregistered')).rejects.toThrow('thread_not_allowed');
+    await expect(f.agent.resolve('unregistered')).rejects.toThrow('session_not_allowed');
   });
 
   it('serializes concurrent dispatch reservations across service instances', async () => {
@@ -272,7 +298,7 @@ describe('Codex request boundary', () => {
       answer: saved.answers[0]!,
       selectedOption: undefined,
     };
-    const second = new CodexDecisionAgent(f.rpc, f.repository, new Map([[threadId, '/test']]));
+    const second = gateway(f.rpc, f.repository);
     await Promise.allSettled([f.agent.deliver(delivery), second.deliver(delivery)]);
     expect(f.starts()).toBe(1);
     expect(answerMessage(delivery)).toContain('"intent":"research"');
@@ -344,7 +370,58 @@ describe('Codex request boundary', () => {
     const conflict = await run();
     expect(conflict.exitCode).toBe(1);
     expect(conflict.stderr).toContain('409');
+    writeFileSync(
+      config,
+      JSON.stringify({
+        url,
+        uiUrl: `${url}/ko/decisions`,
+        token: 'test-token',
+        connectionId: 'local-codex',
+      }),
+    );
+    writeFileSync(input, JSON.stringify(body));
+    const namespaced = await run();
+    expect(namespaced.exitCode).toBe(0);
+    expect(namespaced.stdout).not.toBe(first.stdout);
+    expect(f.service.list()).toHaveLength(2);
+    writeFileSync(
+      input,
+      JSON.stringify({ ...body, source: { connectionId: 'forged', sessionId: 'other' } }),
+    );
+    expect((await run()).stderr).toContain('invalid_input_or_configuration');
     writeFileSync(input, 'not json');
     expect((await run()).stderr).toContain('invalid_input_or_configuration');
   });
+});
+
+it('observes loaded pagination and refuses unknown native turn states', async () => {
+  let status = 'completed';
+  const calls: string[] = [];
+  const observer = new CodexSessionObserver(
+    {
+      call: (method, params) => {
+        calls.push(method);
+        if (method === 'thread/read') {
+          return Promise.resolve({
+            thread: {
+              id: threadId,
+              cwd: '/test',
+              canAcceptDirectInput: true,
+              turns: [{ id: 'turn', status, items: [] }],
+            },
+          });
+        }
+        return Promise.resolve(
+          params.cursor
+            ? { data: [threadId], nextCursor: null }
+            : { data: ['other-session'], nextCursor: 'page-2' },
+        );
+      },
+    },
+    new Map([[threadId, '/test']]),
+  );
+  expect((await observer.read(threadId)).state).toBe('ready');
+  expect(calls.filter((method) => method === 'thread/loaded/list')).toHaveLength(2);
+  status = 'future-unknown-state';
+  expect((await observer.read(threadId)).state).toBe('offline');
 });

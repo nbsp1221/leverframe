@@ -715,6 +715,13 @@
       "superseded": "This request no longer needs an answer"
     },
     "recommendationUnavailable": "Why no option is recommended",
-    "recommendationWithheld": "Recommendation withheld"
+    "recommendationWithheld": "Recommendation withheld",
+    "checkReceipt": "Check receipt again",
+    "deliveryIssue": {
+      "offline": "Your response is saved. We will check the original task and deliver when the connection recovers.",
+      "busy": "We will check again when the conversation is idle. Delivery stops if the task has changed.",
+      "unsupported": "This connection lacks a required delivery capability. Check its configuration.",
+      "unconfirmed": "The response may have arrived. We are checking for a receipt and will not send it again while uncertain."
+    }
   }
 }

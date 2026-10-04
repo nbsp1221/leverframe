@@ -715,6 +715,13 @@
       "superseded": "이 요청은 더 이상 답변할 필요가 없어요"
     },
     "recommendationUnavailable": "추천을 보류한 이유",
-    "recommendationWithheld": "추천 보류"
+    "recommendationWithheld": "추천 보류",
+    "checkReceipt": "수신 여부 다시 확인",
+    "deliveryIssue": {
+      "offline": "답변은 저장됐어요. 연결이 복구되면 원래 작업을 확인하고 전달할게요.",
+      "busy": "대화에서 진행 중인 작업이 끝나면 다시 확인할게요. 작업 방향이 바뀌었다면 전달을 멈춰요.",
+      "unsupported": "이 연결에서는 안전한 답변 전달에 필요한 기능을 사용할 수 없어요. 연결 설정을 확인해 주세요.",
+      "unconfirmed": "전달했을 가능성이 있어 수신 여부를 확인 중이에요. 확인 전에는 같은 답변을 다시 보내지 않아요."
+    }
   }
 }
