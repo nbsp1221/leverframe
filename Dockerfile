@@ -15,6 +15,8 @@ RUN pnpm install --frozen-lockfile
 COPY apps/reviewer ./apps/reviewer
 COPY apps/web ./apps/web
 COPY packages ./packages
+COPY .agents/skills/leverframe-ask/SKILL.md ./.agents/skills/leverframe-ask/SKILL.md
+COPY .agents/skills/leverframe-ask/scripts/ask.py ./.agents/skills/leverframe-ask/scripts/ask.py
 RUN pnpm --filter @repo/reviewer build \
   && pnpm --filter @repo/reviewer deploy --prod /app/reviewer-runtime \
   && pnpm --filter @repo/web build

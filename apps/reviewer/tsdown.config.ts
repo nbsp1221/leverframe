@@ -8,7 +8,7 @@ export default defineConfig({
   format: ['esm'],
   outExtensions: () => ({ js: '.js' }),
   deps: {
-    alwaysBundle: ['@repo/contracts', '@scalar/openapi-to-markdown'],
+    alwaysBundle: [/^@repo\/contracts(?:\/|$)/, '@scalar/openapi-to-markdown'],
   },
   platform: 'node',
   sourcemap: true,
