@@ -351,6 +351,12 @@ describe('Codex request boundary', () => {
     const second = await run();
     expect(second.stdout).toBe(first.stdout);
     expect(f.service.list()).toHaveLength(1);
+    writeFileSync(input, JSON.stringify({ ...body, project: '' }));
+    const missingProject = await run();
+    expect(missingProject.stderr).toContain('invalid_question');
+    expect(missingProject.stderr).toContain('project must contain');
+    expect(missingProject.stderr).not.toContain('httpStatus');
+    expect(f.service.list()).toHaveLength(1);
     writeFileSync(
       input,
       JSON.stringify({
@@ -396,6 +402,8 @@ describe('Codex request boundary', () => {
 
 it('observes loaded pagination and refuses unknown native turn states', async () => {
   let status = 'completed';
+  let loaded = true;
+  let canAcceptDirectInput: boolean | null = true;
   const calls: string[] = [];
   const observer = new CodexSessionObserver(
     {
@@ -406,10 +414,13 @@ it('observes loaded pagination and refuses unknown native turn states', async ()
             thread: {
               id: threadId,
               cwd: '/test',
-              canAcceptDirectInput: true,
+              canAcceptDirectInput,
               turns: [{ id: 'turn', status, items: [] }],
             },
           });
+        }
+        if (!loaded) {
+          return Promise.resolve({ data: [], nextCursor: null });
         }
         return Promise.resolve(
           params.cursor
@@ -424,4 +435,13 @@ it('observes loaded pagination and refuses unknown native turn states', async ()
   expect(calls.filter((method) => method === 'thread/loaded/list')).toHaveLength(2);
   status = 'future-unknown-state';
   expect((await observer.read(threadId)).state).toBe('offline');
+  status = 'completed';
+  loaded = false;
+  canAcceptDirectInput = null;
+  expect(await observer.read(threadId)).toEqual({
+    revision: 'turn',
+    state: 'offline',
+    messages: [],
+  });
+  expect(await observer.isLoaded(threadId)).toBe(false);
 });

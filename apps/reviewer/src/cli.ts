@@ -150,7 +150,11 @@ function serve(): void {
     credentials,
     {
       ...(decisions
-        ? { decisions: decisions.service, decisionRegistration: decisions.registration }
+        ? {
+            decisions: decisions.service,
+            decisionRegistration: decisions.registration,
+            connectors: decisions.connectors,
+          }
         : {}),
       isSandboxAvailable: () => sandboxRuntimeAvailable(config.sandboxTemplate),
       isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,

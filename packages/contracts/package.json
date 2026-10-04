@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./decisions": "./src/decisions.ts"
+    "./decisions": "./src/decisions.ts",
+    "./connectors": "./src/connectors.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -6,7 +6,7 @@ const resultSchema = z.object({
   thread: z.object({
     id: z.string(),
     cwd: z.string(),
-    canAcceptDirectInput: z.boolean().optional(),
+    canAcceptDirectInput: z.boolean().nullish(),
     turns: z.array(
       z.object({ id: z.string(), status: z.string(), items: z.array(z.unknown()).default([]) }),
     ),
@@ -62,7 +62,7 @@ export class CodexSessionObserver implements SessionObserver {
     };
   }
 
-  private async isLoaded(sessionId: string): Promise<boolean> {
+  async isLoaded(sessionId: string): Promise<boolean> {
     const seen = new Set<string>();
     let cursor: string | undefined;
     do {

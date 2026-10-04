@@ -18,7 +18,7 @@ export interface PreparedSession {
 }
 
 export interface SessionChannel {
-  prepare(sessionId: string, cwd: string): Promise<PreparedSession>;
+  prepare(sessionId: string, cwd: string, expectedRevision?: string): Promise<PreparedSession>;
 }
 
 export interface AgentConnection {

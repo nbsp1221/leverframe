@@ -118,6 +118,7 @@ export class SessionDecisionGateway implements AgentGateway {
       const prepared = await connection.channel.prepare(
         sessionId,
         connection.sessions.get(sessionId)!,
+        delivery.context.taskRevision,
       );
       try {
         // Loading an adapter can take time. Recheck the actual target immediately before send.

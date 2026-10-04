@@ -30,7 +30,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@repo/ui/components/tooltip';
-import { BotIcon, GitPullRequestIcon, InboxIcon, MoonIcon, SunIcon } from 'lucide-react';
+import {
+  BotIcon,
+  GitPullRequestIcon,
+  InboxIcon,
+  MonitorIcon,
+  MoonIcon,
+  SunIcon,
+} from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
@@ -129,6 +136,16 @@ function AppSidebar() {
                   <span>{t('development')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={pathname.includes('/connections')}
+                  tooltip={t('connections')}
+                  render={<Link href="/connections" />}
+                >
+                  <MonitorIcon aria-hidden="true" />
+                  <span>{t('connections')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -170,6 +187,7 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
   const isDark = mounted && resolvedTheme === 'dark';
   const isDevelopment = pathname.includes('/development');
   const isDecision = pathname.includes('/decisions');
+  const isConnection = pathname.includes('/connections');
 
   return (
     <div className="flex min-h-svh min-w-0 flex-1 flex-col bg-background">
@@ -181,10 +199,10 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
 
         <Breadcrumb aria-label={t('breadcrumb')} className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap overflow-hidden text-sm">
-            {isDevelopment || isDecision ? (
+            {isDevelopment || isDecision || isConnection ? (
               <BreadcrumbItem>
                 <BreadcrumbPage className="font-semibold text-foreground">
-                  {t(isDecision ? 'decisions' : 'development')}
+                  {t(isConnection ? 'connections' : isDecision ? 'decisions' : 'development')}
                 </BreadcrumbPage>
               </BreadcrumbItem>
             ) : (

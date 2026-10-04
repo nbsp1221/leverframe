@@ -15,7 +15,14 @@ export default [
   ...config,
   {
     name: 'leverframe/ignore-generated',
-    ignores: ['**/dist/**', '**/.turbo/**', '**/.next/**', '**/.internal/**', '**/*.tsbuildinfo'],
+    ignores: [
+      '**/dist/**',
+      '**/.turbo/**',
+      '**/.next/**',
+      '**/.internal/**',
+      '**/.leverframe/**',
+      '**/*.tsbuildinfo',
+    ],
   },
   // The final core-web-vitals entry contains the official Next rules. The
   // preceding compatibility entry re-registers react-hooks under ESLint 10.

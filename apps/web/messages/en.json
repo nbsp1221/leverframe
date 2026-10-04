@@ -33,7 +33,8 @@
     "sandbox": "Sandbox",
     "github": "GitHub",
     "database": "Database",
-    "decisions": "Requests"
+    "decisions": "Requests",
+    "connections": "Connected computers"
   },
   "development": {
     "title": "Agent development",
@@ -722,6 +723,70 @@
       "busy": "We will check again when the conversation is idle. Delivery stops if the task has changed.",
       "unsupported": "This connection lacks a required delivery capability. Check its configuration.",
       "unconfirmed": "The response may have arrived. We are checking for a receipt and will not send it again while uncertain."
-    }
+    },
+    "connections": "Connected computers"
+  },
+  "connectors": {
+    "title": "Connected computers",
+    "description": "Connect a computer once. Receive questions from its Codex conversations and send your answers back to the original conversation.",
+    "add": "Connect computer",
+    "error": "Could not check connections",
+    "errorHelp": "Check the server and try again. Your setup progress is kept.",
+    "retry": "Try again",
+    "setupTitle": "Run this on the computer where you use Codex",
+    "setupDescription": "Paste this command into its terminal. It installs a connector and question skill for your user and connects to this Leverframe. All conversations in that Codex environment can send questions.",
+    "installCommand": "Install and connect command",
+    "expires": "Connection command expires:",
+    "requirements": "Requires Linux, Node.js 24+ and Python 3. No administrator access required.",
+    "pair": {
+      "waiting": "Waiting for computer",
+      "connected": "Computer registered",
+      "expired": "Command expired"
+    },
+    "connectedTitle": "Your computer is connected",
+    "connectedHelp": "Check Codex readiness below. Try a question and answer to verify the complete connection.",
+    "closeSetup": "Close setup guide",
+    "expiredHelp": "The computer has not registered. Generate and run a new command.",
+    "newCode": "Generate new command",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyManually": "Text selected. Use Ctrl+C or the Copy menu.",
+    "emptyTitle": "Connect the computer where you use Codex",
+    "emptyDescription": "No need to register each conversation. The source is verified and linked automatically when a question arrives.",
+    "scope": "Codex Desktop conversations on this computer · No project or session registration",
+    "status": {
+      "online": "Connected",
+      "offline": "Offline",
+      "revoked": "Disconnected"
+    },
+    "agent": "Codex status",
+    "agentReady": "App reachable",
+    "agentMissing": "Check app connection",
+    "agentUnknown": "Check after reconnection",
+    "skill": "Question skill",
+    "skillInstalled": "Installed",
+    "skillMissing": "Check installation",
+    "roundtrip": "Questions and answers",
+    "roundtripDone": "Answer delivery to original conversation verified",
+    "questionReceived": "Question received · Answer delivery not verified",
+    "notTested": "Not used yet",
+    "offlineTitle": "Answers are saved while waiting for reconnection",
+    "offlineHelp": "Restart the connector on this computer to reconnect automatically.",
+    "codexMissingTitle": "Check the Codex app connection",
+    "codexMissingHelp": "Open Codex on this computer. This connection uses the Codex Desktop runtime. Independent CLI runs are not supported yet.",
+    "lastSeen": "Last seen",
+    "test": "Try it",
+    "disconnect": "Disconnect",
+    "testTitle": "Ask a question from Codex as usual",
+    "testDescription": "Send the text below in a new conversation, then answer in the inbox. Project and session details are linked automatically. If an existing conversation cannot see the skill, open a new one.",
+    "testPromptLabel": "Message to send in Codex",
+    "testPrompt": "Use the leverframe-ask skill to send one connection-check question: “Shall we check that the answer returns to this conversation?” Recommend “Yes, check it”. After saving it, wait for the answer, then briefly acknowledge what you received. Do not modify project files.",
+    "openInbox": "Answer in the inbox",
+    "lastDelivery": "Last verified answer delivery",
+    "disconnectTitle": "Disconnect this computer?",
+    "disconnectHelp": "New questions and answer delivery will stop. Saved questions and answers remain. Connect the computer again to use it in the future.",
+    "confirmDisconnect": "Disconnect computer",
+    "cancel": "Cancel",
+    "disconnectedHistory": "Disconnected computers"
   }
 }

@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createAgentConnections, loadDecisionRuntimeConfig } from '../agent-connections/config.js';
+import { ConnectorRuntime } from '../connectors/runtime.js';
+import { ConnectorStore } from '../connectors/store.js';
 import { SessionDecisionGateway } from '../decisions/delivery.js';
 import { DecisionService } from '../decisions/service.js';
 import { SqliteDecisionRepository } from '../decisions/sqlite-repository.js';
@@ -15,6 +17,7 @@ export function createDecisionRuntime(configPath: string) {
   const repository = new SqliteDecisionRepository(config.databasePath, config.legacyConnectionId);
   const gateway = new SessionDecisionGateway(connections, repository, config.legacyConnectionId);
   const service = new DecisionService(repository, gateway);
+  const connectors = new ConnectorRuntime(new ConnectorStore(config.databasePath), connections);
   let running: Promise<void> | undefined;
   let stopped = false;
 
@@ -32,6 +35,13 @@ export function createDecisionRuntime(configPath: string) {
           (item.status === 'delivery_failed' && item.deliveryIssue !== 'unsupported')
         ) {
           await service.dispatch(item.id);
+          const current = service.get(item.id);
+          if (
+            current.status === 'delivered' &&
+            current.context.connectionId?.startsWith('connector-')
+          ) {
+            connectors.store.recordDelivery(current.context.connectionId);
+          }
         }
       }
     })()
@@ -45,6 +55,7 @@ export function createDecisionRuntime(configPath: string) {
   let timer: ReturnType<typeof setInterval> | undefined;
   return {
     service,
+    connectors,
     registration: {
       token,
       resolve: (sessionId: string, connectionId?: string) =>
@@ -60,9 +71,11 @@ export function createDecisionRuntime(configPath: string) {
     },
     close: async () => {
       stopped = true;
+      connectors.stop();
       clearInterval(timer);
       await running;
       repository.close();
+      connectors.store.close();
     },
   };
 }

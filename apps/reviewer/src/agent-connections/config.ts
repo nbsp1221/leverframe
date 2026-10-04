@@ -49,12 +49,15 @@ export const decisionRuntimeConfigSchema = z
     databasePath: path,
     tokenFile: path,
     legacyConnectionId: z.string().min(1),
-    connections: z.array(connection).min(1),
+    connections: z.array(connection).default([]),
   })
   .strict()
   .superRefine((value, ctx) => {
     const ids = value.connections.map((item) => item.id);
-    if (new Set(ids).size !== ids.length || !ids.includes(value.legacyConnectionId)) {
+    if (
+      new Set(ids).size !== ids.length ||
+      (ids.length > 0 && !ids.includes(value.legacyConnectionId))
+    ) {
       ctx.addIssue({
         code: 'custom',
         message: 'Connection IDs must be unique and include legacyConnectionId',
@@ -70,7 +73,7 @@ export function loadDecisionRuntimeConfig(configPath: string): DecisionRuntimeCo
 
 export function createAgentConnections(
   config: DecisionRuntimeConfig,
-): ReadonlyMap<string, AgentConnection> {
+): Map<string, AgentConnection> {
   return new Map(
     config.connections.map((item) => {
       const sessions = new Map(Object.entries(item.sessions));

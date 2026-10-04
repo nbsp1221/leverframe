@@ -3,7 +3,7 @@
 import type { Decision } from '@repo/contracts/decisions';
 import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
 import { Badge } from '@repo/ui/components/badge';
-import { Button } from '@repo/ui/components/button';
+import { Button, buttonVariants } from '@repo/ui/components/button';
 import {
   Empty,
   EmptyDescription,
@@ -31,6 +31,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { LocalTime } from '../../components/local-time';
 import { PageFrame } from '../../components/page-frame';
 import { PageSurface } from '../../components/page-surface';
+import { Link } from '../../i18n/navigation';
 import { loadDecisions } from './decision-api';
 import { DecisionDetail } from './decision-detail';
 
@@ -112,16 +113,21 @@ export function DecisionWorkspace() {
           <h1 className="text-3xl font-semibold tracking-tight">{t('title')}</h1>
           <p className="text-sm leading-6 text-muted-foreground">{t('description')}</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void refresh();
-          }}
-        >
-          <RefreshCwIcon data-icon="inline-start" />
-          {t('refresh')}
-        </Button>
+        <div className="flex gap-2">
+          <Link href="/connections" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            {t('connections')}
+          </Link>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void refresh();
+            }}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            {t('refresh')}
+          </Button>
+        </div>
       </header>
       {error && (
         <Alert variant="destructive">

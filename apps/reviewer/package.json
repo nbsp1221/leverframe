@@ -10,7 +10,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "tsdown && node scripts/copy-scalar-browser.mjs",
+    "build": "tsdown && node scripts/copy-scalar-browser.mjs && pnpm build:connector",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "test:dist": "node dist/cli.js --version",
@@ -18,7 +18,8 @@
     "test:integration": "vitest run --project integration",
     "test:unit": "vitest run --project unit",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:connector": "tsdown --config tsdown.connector.config.ts && node scripts/package-connector.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/codex-acp": "2.1.1",

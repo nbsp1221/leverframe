@@ -18,6 +18,17 @@ class RecommendationError(ValueError):
     pass
 
 
+class QuestionInputError(ValueError):
+    pass
+
+
+def validate_required_text(payload):
+    for field, maximum in (('project', 100), ('title', 200), ('question', 4000), ('why', 4000)):
+        value = payload.get(field)
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > maximum:
+            raise QuestionInputError(f'{field} must contain 1–{maximum} characters. project is a display label from the current task, not a project registration.')
+
+
 def validate_recommendation(payload):
     options = payload.get('options', [])
     if not isinstance(options, list) or any(not isinstance(option, dict) or not isinstance(option.get('recommended'), bool) for option in options):
@@ -32,12 +43,19 @@ def validate_recommendation(payload):
     raise RecommendationError('Mark exactly one option recommended with a nonempty recommendation reason and omit recommendationUnavailableReason entirely (not null), or provide recommendationUnavailableReason with no recommended option and an empty recommendation.')
 
 
+def default_config():
+    adjacent = Path(__file__).resolve().parent.parent / 'connection.json'
+    return os.environ.get('LEVERFRAME_AGENT_CONFIG') or str(adjacent if adjacent.exists() else Path.home() / '.agents' / 'skills' / 'leverframe-ask' / 'connection.json')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog='''Input JSON fields:
 project, title, goal, question, why, waitingFor, continuing, recommendation: strings;
 mode: "blocking" or "nonblocking"; assumption: string or null;
 constraints: string[]; facts: [{label, detail}];
 options: [{id, label, effect, recommended: boolean}].
+project (1–100), title (1–200), question and why (1–4000) must be nonempty.
+project is a display label from the current task; no project registration is needed.
 Recommend exactly one option and explain why in recommendation. Labels stay plain.
 If evidence cannot support a recommendation, mark none, keep recommendation empty,
 and provide recommendationUnavailableReason explaining the missing basis.
@@ -45,7 +63,7 @@ Advice is not approval: the user retaining final choice is not a reason to withh
 Use empty arrays/strings for genuinely absent optional context, not invented facts.
 Nonblocking requires an already authorized assumption and independent continuing work.
 The script supplies key and threadId. It cannot submit answers on the user's behalf.''')
-    parser.add_argument('--config', default=os.environ.get('LEVERFRAME_AGENT_CONFIG'), help='Local connection JSON file; never print its contents')
+    parser.add_argument('--config', default=default_config(), help='Local connection JSON file; never print its contents')
     parser.add_argument('--key', required=True, help='Stable identity for this question, reused on retries')
     parser.add_argument('--file', required=True, help='Question JSON file')
     args = parser.parse_args()
@@ -67,6 +85,7 @@ The script supplies key and threadId. It cannot submit answers on the user's beh
         if not isinstance(payload, dict) or any(field in payload for field in ('threadId', 'source', 'key')):
             raise ValueError('the script supplies key and session source')
         validate_recommendation(payload)
+        validate_required_text(payload)
         payload.update(key=args.key)
         if config.get('connectionId'):
             payload['source'] = {'connectionId': config['connectionId'], 'sessionId': thread}
@@ -82,6 +101,9 @@ The script supplies key and threadId. It cannot submit answers on the user's beh
         return 0
     except RecommendationError as error:
         print(json.dumps({'error': 'recommendation_required', 'next': str(error)}), file=sys.stderr)
+        return 1
+    except QuestionInputError as error:
+        print(json.dumps({'error': 'invalid_question', 'next': str(error)}), file=sys.stderr)
         return 1
     except HTTPError as error:
         # Do not echo server payloads or credentials. A 409 requires inspecting the original request.
