@@ -25,6 +25,7 @@ import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LocalTime } from '../../components/local-time';
 import { PageFrame } from '../../components/page-frame';
+import { PageHeader } from '../../components/page-header';
 import { PageSurface } from '../../components/page-surface';
 import { Link } from '../../i18n/navigation';
 import { createPairing, loadConnectors, loadPairing, revokeConnector } from './connector-api';
@@ -135,21 +136,21 @@ export function ConnectorWorkspace() {
   const active = items?.filter((item) => item.status !== 'revoked') ?? [];
   return (
     <PageFrame className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-3xl font-semibold tracking-tight">{t('title')}</h1>
-          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t('description')}</p>
-        </div>
-        <Button
-          disabled={pending}
-          onClick={() => {
-            void connect();
-          }}
-        >
-          <PlusIcon data-icon="inline-start" />
-          {t('add')}
-        </Button>
-      </header>
+      <PageHeader
+        title={t('title')}
+        description={t('description')}
+        actions={
+          <Button
+            disabled={pending}
+            onClick={() => {
+              void connect();
+            }}
+          >
+            <PlusIcon data-icon="inline-start" />
+            {t('add')}
+          </Button>
+        }
+      />
       {(error || loadError) && (
         <Alert variant="destructive">
           <AlertTitle>{t('error')}</AlertTitle>

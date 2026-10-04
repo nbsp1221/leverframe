@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
 import { Button } from '@repo/ui/components/button';
 import { getTranslations } from 'next-intl/server';
 import { PageFrame } from '../../components/page-frame';
+import { PageHeader } from '../../components/page-header';
 import { PageMetric } from '../../components/page-metric';
 import { PageSurface } from '../../components/page-surface';
 import { Link } from '../../i18n/navigation';
@@ -33,15 +34,15 @@ export async function DevelopmentDashboard({
 
   return (
     <PageFrame className="flex flex-col gap-6 lg:gap-7">
-      <header className="flex flex-col gap-4 px-0.5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-[-0.045em]">{t('title')}</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">{t('subtitle')}</p>
-        </div>
-        {repositories !== null && repositories.length > 0 ? (
-          <DevelopmentCreateSheet repositories={repositories} tickets={tickets} />
-        ) : null}
-      </header>
+      <PageHeader
+        title={t('title')}
+        description={t('subtitle')}
+        actions={
+          repositories !== null && repositories.length > 0 ? (
+            <DevelopmentCreateSheet repositories={repositories} tickets={tickets} />
+          ) : null
+        }
+      />
 
       {repositories === null ? (
         <Alert variant="destructive">

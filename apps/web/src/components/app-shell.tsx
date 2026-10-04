@@ -16,9 +16,6 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
@@ -30,14 +27,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@repo/ui/components/tooltip';
-import {
-  BotIcon,
-  GitPullRequestIcon,
-  InboxIcon,
-  MonitorIcon,
-  MoonIcon,
-  SunIcon,
-} from 'lucide-react';
+import { MoonIcon, SunIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import Image from 'next/image';
@@ -45,6 +35,7 @@ import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { type CSSProperties, useEffect, useState } from 'react';
 import { Link, usePathname, useRouter } from '../i18n/navigation';
 import { confirmDirtyNavigation } from '../lib/dirty-navigation';
+import { WorkspaceNavigation, getWorkspaceDestination } from './workspace-navigation';
 
 const shellSize = {
   '--sidebar-width': '13.5rem',
@@ -66,7 +57,6 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
 
 function AppSidebar() {
   const t = useTranslations('common');
-  const pathname = usePathname();
 
   return (
     <Sidebar
@@ -78,6 +68,7 @@ function AppSidebar() {
       <SidebarHeader className="h-16 justify-center border-b border-sidebar-border/70 px-3 py-0 group-data-[collapsible=icon]:px-2">
         <Link
           href="/reviews"
+          aria-label={t('brand')}
           className="flex h-10 items-center gap-3 overflow-hidden rounded-xl px-2 outline-none transition-colors hover:bg-sidebar-accent/70 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
         >
           <span className="grid size-7 shrink-0 place-items-center overflow-hidden rounded-lg bg-primary shadow-sm shadow-primary/10">
@@ -102,51 +93,7 @@ function AppSidebar() {
             {t('workspace')}
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={pathname.includes('/decisions')}
-                  tooltip={t('decisions')}
-                  className="h-10 rounded-xl px-3 text-sm font-medium data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
-                  render={<Link href="/decisions" />}
-                >
-                  <InboxIcon aria-hidden="true" />
-                  <span>{t('decisions')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={pathname.endsWith('/reviews')}
-                  tooltip={t('codeReviewBot')}
-                  className="h-10 rounded-xl px-3 text-sm font-medium data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
-                  render={<Link href="/reviews" />}
-                >
-                  <GitPullRequestIcon aria-hidden="true" className="size-4.5" />
-                  <span>{t('codeReviewBot')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={pathname.includes('/development')}
-                  tooltip={t('development')}
-                  className="h-10 rounded-xl px-3 text-sm font-medium data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
-                  render={<Link href="/development" />}
-                >
-                  <BotIcon aria-hidden="true" />
-                  <span>{t('development')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={pathname.includes('/connections')}
-                  tooltip={t('connections')}
-                  render={<Link href="/connections" />}
-                >
-                  <MonitorIcon aria-hidden="true" />
-                  <span>{t('connections')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
+            <WorkspaceNavigation />
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
@@ -185,9 +132,7 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
   }
 
   const isDark = mounted && resolvedTheme === 'dark';
-  const isDevelopment = pathname.includes('/development');
-  const isDecision = pathname.includes('/decisions');
-  const isConnection = pathname.includes('/connections');
+  const destination = getWorkspaceDestination(pathname);
 
   return (
     <div className="flex min-h-svh min-w-0 flex-1 flex-col bg-background">
@@ -199,10 +144,10 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
 
         <Breadcrumb aria-label={t('breadcrumb')} className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap overflow-hidden text-sm">
-            {isDevelopment || isDecision || isConnection ? (
+            {destination && destination.href !== '/reviews' ? (
               <BreadcrumbItem>
                 <BreadcrumbPage className="font-semibold text-foreground">
-                  {t(isConnection ? 'connections' : isDecision ? 'decisions' : 'development')}
+                  {t(destination.label)}
                 </BreadcrumbPage>
               </BreadcrumbItem>
             ) : (

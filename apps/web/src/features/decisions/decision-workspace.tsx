@@ -30,6 +30,7 @@ import { parseAsString, parseAsStringEnum, useQueryState } from 'nuqs';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LocalTime } from '../../components/local-time';
 import { PageFrame } from '../../components/page-frame';
+import { PageHeader } from '../../components/page-header';
 import { PageSurface } from '../../components/page-surface';
 import { Link } from '../../i18n/navigation';
 import { loadDecisions } from './decision-api';
@@ -103,32 +104,31 @@ export function DecisionWorkspace() {
   return (
     <PageFrame className="flex flex-col gap-6">
       {selectedId && <h1 className="sr-only lg:hidden">{t('title')}</h1>}
-      <header
-        className={cn(
-          'flex flex-wrap items-start justify-between gap-4',
-          selectedId && 'hidden lg:flex',
-        )}
-      >
-        <div className="flex flex-col gap-2">
-          <h1 className="text-3xl font-semibold tracking-tight">{t('title')}</h1>
-          <p className="text-sm leading-6 text-muted-foreground">{t('description')}</p>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/connections" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-            {t('connections')}
-          </Link>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void refresh();
-            }}
-          >
-            <RefreshCwIcon data-icon="inline-start" />
-            {t('refresh')}
-          </Button>
-        </div>
-      </header>
+      <PageHeader
+        title={t('title')}
+        description={t('description')}
+        className={selectedId ? 'hidden lg:flex' : undefined}
+        actions={
+          <>
+            <Link
+              href="/connections"
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              {t('connections')}
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void refresh();
+              }}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              {t('refresh')}
+            </Button>
+          </>
+        }
+      />
       {error && (
         <Alert variant="destructive">
           <AlertTitle>{t('loadError')}</AlertTitle>

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Button } from '@repo/ui/components/button';
 import { AlertCircleIcon, CheckCircle2Icon } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { PageHeader } from '../../components/page-header';
 import { PageMetric } from '../../components/page-metric';
 import { PageSurface } from '../../components/page-surface';
 import { Link } from '../../i18n/navigation';
@@ -48,10 +49,7 @@ export async function ReviewOverview({
     <ReviewPageFrame className="flex flex-col gap-6 lg:gap-7">
       {controls}
 
-      <header className="px-0.5">
-        <h1 className="text-3xl font-bold tracking-[-0.045em]">{t('title')}</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">{t('subtitle')}</p>
-      </header>
+      <PageHeader title={t('title')} description={t('subtitle')} />
 
       <PageSurface>
         <div className="grid sm:grid-cols-3 xl:grid-cols-[minmax(28rem,1.75fr)_repeat(3,minmax(10rem,0.62fr))]">

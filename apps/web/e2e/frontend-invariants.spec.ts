@@ -70,31 +70,33 @@ test.describe('frontend invariants', () => {
     expect(detailWidth).toBe(inboxWidth);
   });
 
-  test('review and development lists share the product frame and title scale', async ({ page }) => {
-    await page.goto('/en/reviews?fixture=default');
-    const reviewFrame = await page
-      .locator('[data-slot="review-page-frame"]')
-      .evaluate((element) => Math.round(element.getBoundingClientRect().width));
-    const reviewTitle = await page
-      .getByRole('heading', { name: 'Reviews', level: 1 })
-      .evaluate((element) => {
-        const style = getComputedStyle(element);
-        return { fontSize: style.fontSize, fontWeight: style.fontWeight };
-      });
-
-    await page.goto('/en/development');
-    const developmentFrame = await page
-      .locator('[data-slot="page-frame"]')
-      .evaluate((element) => Math.round(element.getBoundingClientRect().width));
-    const developmentTitle = await page
-      .getByRole('heading', { name: 'Agent development', level: 1 })
-      .evaluate((element) => {
-        const style = getComputedStyle(element);
-        return { fontSize: style.fontSize, fontWeight: style.fontWeight };
-      });
-
-    expect(developmentFrame).toBe(reviewFrame);
-    expect(developmentTitle).toEqual(reviewTitle);
+  test('all workspace pages share the title hierarchy and frame width', async ({ page }) => {
+    const layouts = [];
+    for (const path of ['reviews?fixture=default', 'development', 'decisions', 'connections']) {
+      await page.goto(`/en/${path}`);
+      const heading = page.getByRole('heading', { level: 1 });
+      await expect(heading).toBeVisible();
+      layouts.push(
+        await heading.evaluate((element) => {
+          const style = getComputedStyle(element);
+          const frame = element.closest(
+            '[data-slot="page-frame"], [data-slot="review-page-frame"]',
+          )!;
+          return {
+            fontSize: style.fontSize,
+            fontWeight: style.fontWeight,
+            letterSpacing: style.letterSpacing,
+            lineHeight: style.lineHeight,
+            width: Math.round(frame.getBoundingClientRect().width),
+            inset: element.getBoundingClientRect().left - frame.getBoundingClientRect().left,
+          };
+        }),
+      );
+    }
+    expect(layouts[0]).toMatchObject({ fontSize: '30px', fontWeight: '700' });
+    for (const layout of layouts.slice(1)) {
+      expect(layout).toEqual(layouts[0]);
+    }
   });
 
   for (const fixture of representativeFixtures) {
