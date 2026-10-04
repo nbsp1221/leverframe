@@ -29,13 +29,15 @@
     "cac": "7.0.0",
     "execa": "10.0.1",
     "hono": "4.13.3",
+    "ws": "^8.22.0",
     "yaml": "^2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@scalar/api-reference": "1.65.1",
-    "@scalar/openapi-to-markdown": "0.5.40"
+    "@scalar/openapi-to-markdown": "0.5.40",
+    "@types/ws": "^8.18.2"
   },
   "engines": {
     "node": ">=24.0.0"
