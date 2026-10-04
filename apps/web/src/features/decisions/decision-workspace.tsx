@@ -3,7 +3,7 @@
 import type { Decision } from '@repo/contracts/decisions';
 import { Alert, AlertDescription, AlertTitle } from '@repo/ui/components/alert';
 import { Badge } from '@repo/ui/components/badge';
-import { Button, buttonVariants } from '@repo/ui/components/button';
+import { Button } from '@repo/ui/components/button';
 import {
   Empty,
   EmptyDescription,
@@ -32,7 +32,7 @@ import { LocalTime } from '../../components/local-time';
 import { PageFrame } from '../../components/page-frame';
 import { PageHeader } from '../../components/page-header';
 import { PageSurface } from '../../components/page-surface';
-import { Link } from '../../i18n/navigation';
+import { ConnectionSetupNotice } from '../connectors/connection-setup-notice';
 import { loadDecisions } from './decision-api';
 import { DecisionDetail } from './decision-detail';
 
@@ -109,26 +109,21 @@ export function DecisionWorkspace() {
         description={t('description')}
         className={selectedId ? 'hidden lg:flex' : undefined}
         actions={
-          <>
-            <Link
-              href="/connections"
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              {t('connections')}
-            </Link>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void refresh();
-              }}
-            >
-              <RefreshCwIcon data-icon="inline-start" />
-              {t('refresh')}
-            </Button>
-          </>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void refresh();
+            }}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            {t('refresh')}
+          </Button>
         }
       />
+      {items !== null && (
+        <ConnectionSetupNotice className={selectedId ? 'hidden lg:grid' : undefined} />
+      )}
       {error && (
         <Alert variant="destructive">
           <AlertTitle>{t('loadError')}</AlertTitle>

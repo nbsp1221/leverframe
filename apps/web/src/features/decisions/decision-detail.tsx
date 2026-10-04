@@ -7,6 +7,7 @@ import { Button } from '@repo/ui/components/button';
 import { ArrowLeftIcon, Clock3Icon, RotateCwIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
+import { ConnectionSettingsLink } from '../../components/connection-settings-link';
 import { LocalTime } from '../../components/local-time';
 import { DecisionAnswerForm, rebaseDecisionDraft } from './decision-answer';
 import { retryDecision, snoozeDecision } from './decision-api';
@@ -141,6 +142,9 @@ export function DecisionDetail({
             {item.status === 'delivery_failed' && item.deliveryIssue
               ? t(`deliveryIssue.${item.deliveryIssue}`)
               : t(`explanation.${item.status}`)}
+            {item.status === 'delivery_failed' && item.deliveryIssue === 'offline' && (
+              <ConnectionSettingsLink>{t('checkConnection')}</ConnectionSettingsLink>
+            )}
             {item.status === 'delivery_failed' && (
               <Button
                 variant="outline"

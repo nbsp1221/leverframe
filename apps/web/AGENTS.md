@@ -13,6 +13,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Use Tailwind's canonical typography utilities (`text-xs` through `text-3xl`) instead of adding a parallel Leverframe font-size namespace such as `text-metadata` or `text-page`.
 - Prefer existing shadcn primitives and variants. Change canonical theme token values only for deliberate system-wide changes after checking their effect across existing shadcn components.
 - Add workspace destinations through `src/components/workspace-navigation.tsx`; menu appearance and route selection belong to the shared renderer, not individual feature pages.
+- Keep everyday work in primary navigation and configuration in the bottom utility area. Offer contextual settings links for setup or actionable failures, and preserve the originating work when returning from settings.
 - Use `PageHeader` for top-level workspace page titles, descriptions, and actions. Detail-page headings may have their own hierarchy; do not duplicate top-level title styles in feature components.
 - Treat FHD 1920×1080 as the primary desktop visual QA viewport; keep QHD, mobile, light/dark, and KO/EN as regressions.
 - Review list, detail, error, and not-found pages share `ReviewPageFrame`; do not add page-specific outer max-widths. Narrow reading widths may exist inside the shared frame only when they serve a specific reading task.

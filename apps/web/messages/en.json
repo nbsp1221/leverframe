@@ -34,7 +34,9 @@
     "github": "GitHub",
     "database": "Database",
     "decisions": "Requests",
-    "connections": "Connected computers"
+    "connections": "Connected computers",
+    "settings": "Settings",
+    "backToWork": "Back to work"
   },
   "development": {
     "title": "Agent development",
@@ -724,7 +726,8 @@
       "unsupported": "This connection lacks a required delivery capability. Check its configuration.",
       "unconfirmed": "The response may have arrived. We are checking for a receipt and will not send it again while uncertain."
     },
-    "connections": "Connected computers"
+    "connections": "Connected computers",
+    "checkConnection": "Check connection"
   },
   "connectors": {
     "title": "Connected computers",
@@ -787,6 +790,11 @@
     "disconnectHelp": "New questions and answer delivery will stop. Saved questions and answers remain. Connect the computer again to use it in the future.",
     "confirmDisconnect": "Disconnect computer",
     "cancel": "Cancel",
-    "disconnectedHistory": "Disconnected computers"
+    "disconnectedHistory": "Disconnected computers",
+    "firstConnectionTitle": "Receive questions from Codex here",
+    "firstConnectionHelp": "Connect the computer where you use Codex once to receive questions and send answers back to your conversations.",
+    "connectionCheckFailed": "Connection status is unavailable",
+    "connectionCheckHelp": "The computer list could not be loaded. This does not mean your connections were removed. You can try again shortly.",
+    "openSettings": "Open connection settings"
   }
 }

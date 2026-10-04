@@ -12,6 +12,7 @@ import { Button } from '@repo/ui/components/button';
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -35,6 +36,7 @@ import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { type CSSProperties, useEffect, useState } from 'react';
 import { Link, usePathname, useRouter } from '../i18n/navigation';
 import { confirmDirtyNavigation } from '../lib/dirty-navigation';
+import { useConnectionSettingsHref } from './connection-settings-link';
 import { WorkspaceNavigation, getWorkspaceDestination } from './workspace-navigation';
 
 const shellSize = {
@@ -93,10 +95,13 @@ function AppSidebar() {
             {t('workspace')}
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <WorkspaceNavigation />
+            <WorkspaceNavigation section="primary" />
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="border-t border-sidebar-border/70 p-2">
+        <WorkspaceNavigation section="utility" />
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
@@ -133,6 +138,7 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
 
   const isDark = mounted && resolvedTheme === 'dark';
   const destination = getWorkspaceDestination(pathname);
+  const settingsHref = useConnectionSettingsHref();
 
   return (
     <div className="flex min-h-svh min-w-0 flex-1 flex-col bg-background">
@@ -144,7 +150,21 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
 
         <Breadcrumb aria-label={t('breadcrumb')} className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap overflow-hidden text-sm">
-            {destination && destination.href !== '/reviews' ? (
+            {destination?.href === '/settings' ? (
+              <>
+                <BreadcrumbItem>
+                  <BreadcrumbLink render={<Link href={settingsHref} />}>
+                    {t('settings')}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage className="font-semibold text-foreground">
+                    {t('connections')}
+                  </BreadcrumbPage>
+                </BreadcrumbItem>
+              </>
+            ) : destination && destination.href !== '/reviews' ? (
               <BreadcrumbItem>
                 <BreadcrumbPage className="font-semibold text-foreground">
                   {t(destination.label)}

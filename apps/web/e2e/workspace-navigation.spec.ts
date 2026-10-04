@@ -32,7 +32,7 @@ for (const locale of ['en', 'ko']) {
         'decisions',
         'reviews?fixture=default',
         'development',
-        'connections',
+        'settings/connections',
         'reviews/241?fixture=completed-multiple-findings',
       ]) {
         await page.goto(`/${locale}/${path}`);
@@ -45,7 +45,12 @@ for (const locale of ['en', 'ko']) {
         // Both the accessible location and visual state must identify the same single link.
         const current = page.locator('[data-sidebar="menu-button"][aria-current="page"]:visible');
         await expect(current).toHaveCount(1);
-        await expect(current).toHaveAttribute('href', `/${locale}/${path.split(/[/?]/)[0]}`);
+        const expectedPath = path.startsWith('settings/')
+          ? `/${locale}/settings/connections`
+          : `/${locale}/${path.split(/[/?]/)[0]}`;
+        expect(new URL((await current.getAttribute('href'))!, page.url()).pathname).toBe(
+          expectedPath,
+        );
         await expect(current).toHaveAttribute('data-active', '');
         await expect(page.locator('[data-sidebar="menu-button"][data-active]:visible')).toHaveCount(
           1,
@@ -83,6 +88,9 @@ for (const locale of ['en', 'ko']) {
             (await menuGeometry(items)).map(({ width, height }) => ({ width, height })),
           )
           .toEqual(Array.from({ length: 4 }, () => ({ width: 40, height: 40 })));
+        await expect
+          .poll(async () => (await menuGeometry(items)).map((item) => item.iconInset))
+          .toEqual([12, 12, 12, 12]);
         const geometry = await menuGeometry(items);
         for (const item of geometry) {
           expect(item).toEqual(geometry[0]);

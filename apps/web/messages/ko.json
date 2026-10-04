@@ -34,7 +34,9 @@
     "github": "GitHub",
     "database": "Database",
     "decisions": "요청함",
-    "connections": "연결된 컴퓨터"
+    "connections": "연결된 컴퓨터",
+    "settings": "설정",
+    "backToWork": "작업으로 돌아가기"
   },
   "development": {
     "title": "에이전트 개발",
@@ -724,7 +726,8 @@
       "unsupported": "이 연결에서는 안전한 답변 전달에 필요한 기능을 사용할 수 없어요. 연결 설정을 확인해 주세요.",
       "unconfirmed": "전달했을 가능성이 있어 수신 여부를 확인 중이에요. 확인 전에는 같은 답변을 다시 보내지 않아요."
     },
-    "connections": "연결된 컴퓨터"
+    "connections": "연결된 컴퓨터",
+    "checkConnection": "연결 확인"
   },
   "connectors": {
     "title": "연결된 컴퓨터",
@@ -787,6 +790,11 @@
     "disconnectHelp": "새 질문과 답변 전달을 중지해요. 저장된 질문과 답변은 남아요. 다시 사용하려면 컴퓨터를 새로 연결해야 해요.",
     "confirmDisconnect": "연결 해제하기",
     "cancel": "취소",
-    "disconnectedHistory": "해제한 컴퓨터"
+    "disconnectedHistory": "해제한 컴퓨터",
+    "firstConnectionTitle": "Codex의 질문을 여기에서 받아보세요",
+    "firstConnectionHelp": "Codex를 사용하는 컴퓨터를 한 번 연결하면, 여러 대화의 질문을 받고 답변을 돌려보낼 수 있어요.",
+    "connectionCheckFailed": "연결 상태를 확인할 수 없어요",
+    "connectionCheckHelp": "연결 목록을 불러오지 못했어요. 기존 연결이 해제된 것은 아니며, 잠시 후 다시 확인할 수 있어요.",
+    "openSettings": "연결 설정 열기"
   }
 }
