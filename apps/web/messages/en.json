@@ -672,16 +672,18 @@
       "investigating": "Investigating",
       "applied": "Application reported",
       "delivery_failed": "Delivery failed",
-      "superseded": "Superseded"
+      "superseded": "Superseded",
+      "discarded": "Discarded"
     },
     "explanation": {
       "awaiting_answer": "This request needs your judgment.",
       "queued": "Your response is saved and waiting to reach the task.",
-      "delivered": "The agent received your response. Waiting for its application report.",
+      "delivered": "Your response reached the original conversation. Follow the subsequent work there.",
       "investigating": "Research is underway. Findings will return to this request.",
       "applied": "The update below is the agent’s report, not independent verification of the implementation.",
       "delivery_failed": "You do not need to rewrite it. You can retry delivery of the saved response.",
-      "superseded": "The task changed after this request. Responses will no longer be applied."
+      "superseded": "The task changed after this request. Responses will no longer be applied.",
+      "discarded": "You discarded this question. No response was sent."
     },
     "event": {
       "opened": "Agent requested a decision",
@@ -695,7 +697,8 @@
       "superseded": "Request superseded",
       "snoozed": "Saved for later",
       "woken": "Returned to requests",
-      "recommendation_updated": "Recommendation updated"
+      "recommendation_updated": "Recommendation updated",
+      "discarded": "You discarded the question"
     },
     "later": "Later",
     "noAnswersNeeded": "No requests need an answer right now",
@@ -711,23 +714,28 @@
     "independentWork": "Independent work can continue",
     "next": {
       "queued": "The system will deliver your response next",
-      "delivered": "Waiting for the agent’s follow-up",
+      "delivered": "Follow subsequent work in the original conversation",
       "investigating": "The agent is investigating",
       "applied": "The agent sent an application report",
       "delivery_failed": "Your response is saved; delivery is unconfirmed",
-      "superseded": "This request no longer needs an answer"
+      "superseded": "This request no longer needs an answer",
+      "discarded": "This question was discarded"
     },
     "recommendationUnavailable": "Why no option is recommended",
     "recommendationWithheld": "Recommendation withheld",
     "checkReceipt": "Check receipt again",
     "deliveryIssue": {
       "offline": "Your response is saved. We will check the original task and deliver when the connection recovers.",
-      "busy": "We will check again when the conversation is idle. Delivery stops if the task has changed.",
+      "busy": "The conversation is active. We will deliver your saved response when it is idle.",
       "unsupported": "This connection lacks a required delivery capability. Check its configuration.",
       "unconfirmed": "The response may have arrived. We are checking for a receipt and will not send it again while uncertain."
     },
     "connections": "Connected computers",
-    "checkConnection": "Check connection"
+    "checkConnection": "Check connection",
+    "discard": "Discard question",
+    "discardTitle": "Discard this question?",
+    "discardHelp": "Move it to past requests without answering. Its history is kept. This does not send a response or stop the agent’s work.",
+    "keepRequest": "Keep question"
   },
   "connectors": {
     "title": "Connected computers",

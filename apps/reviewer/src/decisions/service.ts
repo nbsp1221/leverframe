@@ -119,6 +119,14 @@ export class DecisionService {
     return this.update({ ...item, status: 'queued' }, 'retry', '');
   }
 
+  discard(id: string, expectedRevision: number): Decision {
+    const item = this.get(id);
+    if (item.revision !== expectedRevision || item.status !== 'awaiting_answer') {
+      throw new DecisionConflict('decision_changed');
+    }
+    return this.update({ ...item, status: 'discarded', snoozedUntil: null }, 'discarded', '');
+  }
+
   snooze(id: string, expectedRevision: number, deferred: boolean): Decision {
     const item = this.get(id);
     if (item.revision !== expectedRevision || item.status !== 'awaiting_answer') {

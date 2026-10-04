@@ -41,7 +41,7 @@ type Bucket = 'attention' | 'progress' | 'later' | 'closed';
 const buckets: Bucket[] = ['attention', 'progress', 'later', 'closed'];
 
 function bucket(item: Decision, now: number): Bucket {
-  if (item.status === 'applied' || item.status === 'superseded') {
+  if (['applied', 'superseded', 'discarded'].includes(item.status)) {
     return 'closed';
   }
   if (item.status === 'awaiting_answer') {

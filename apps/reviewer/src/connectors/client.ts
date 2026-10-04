@@ -184,9 +184,6 @@ export function startConnector(config: ConnectorClientConfig, assets: string) {
           config.token,
         );
         const snapshot = await target.observer.read(command.sessionId);
-        if (snapshot.revision !== command.revision || snapshot.state === 'cancelled') {
-          return { ok: false, error: 'superseded' };
-        }
         if (snapshot.state !== 'ready') {
           return { ok: false, error: snapshot.state === 'busy' ? 'busy' : 'offline' };
         }

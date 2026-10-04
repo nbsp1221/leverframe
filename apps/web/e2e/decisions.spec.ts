@@ -2,6 +2,51 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { decisionSchema } from '@repo/contracts/decisions';
 
+test('discarding an unanswered question preserves history and requires confirmation', async ({
+  page,
+  request,
+}) => {
+  const response = await request.get('/api/v1/decisions/dr-104');
+  let item = decisionSchema.parse({
+    ...(await response.json()),
+    id: 'discard-test',
+    status: 'awaiting_answer',
+    answers: [],
+    revision: 0,
+    events: [],
+  });
+  let discarded = 0;
+  await page.route('**/api/v1/decisions', (route) => route.fulfill({ json: { items: [item] } }));
+  await page.route('**/api/v1/decisions/discard-test/discard', (route) => {
+    expect(route.request().postDataJSON()).toEqual({ expectedRevision: 0 });
+    discarded++;
+    item = {
+      ...item,
+      status: 'discarded',
+      revision: 1,
+      events: [{ id: 'discarded', kind: 'discarded', at: new Date().toISOString(), text: '' }],
+    };
+    return route.fulfill({ json: item });
+  });
+  await page.goto('/en/decisions?request=discard-test');
+  await page.getByRole('button', { name: 'Discard question', exact: true }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('does not send a response or stop');
+  await dialog.getByRole('button', { name: 'Keep question' }).click();
+  await expect(dialog).toBeHidden();
+  expect(discarded).toBe(0);
+  await page.getByRole('button', { name: 'Discard question', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Discard question', exact: true }).click();
+  await expect(page.locator('article')).toContainText('This question was discarded');
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Send response', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Request history', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Request history' })).toContainText(
+    'You discarded the question',
+  );
+  expect(discarded).toBe(1);
+});
+
 test('a response survives navigation and research returns to the same decision', async ({
   page,
 }, testInfo) => {

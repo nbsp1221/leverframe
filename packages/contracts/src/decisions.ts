@@ -8,6 +8,7 @@ export const decisionStatusSchema = z.enum([
   'applied',
   'delivery_failed',
   'superseded',
+  'discarded',
 ]);
 export const decisionAnswerSchema = z
   .object({
@@ -77,6 +78,7 @@ export const decisionSchema = z.object({
         'delivery_failed',
         'retry',
         'superseded',
+        'discarded',
         'snoozed',
         'woken',
         'recommendation_updated',

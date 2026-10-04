@@ -131,10 +131,16 @@ describe('agent-readable API documentation', () => {
         'cleanupDevelopmentRun',
       ]),
     );
-    expect(operationIds).toHaveLength(30);
+    expect(operationIds).toHaveLength(31);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
+      [
+        'post',
+        '/api/v1/decisions/{id}/discard',
+        'discardDecision',
+        ['200', '404', '409', '422', '503'],
+      ],
       ['post', '/api/v1/decisions', 'createDecision', ['200', '401', '404', '409', '422', '503']],
       [
         'post',

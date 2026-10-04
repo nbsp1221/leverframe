@@ -42,6 +42,12 @@ export async function retryDecision(id: string, expectedRevision: number): Promi
   );
 }
 
+export async function discardDecision(id: string, expectedRevision: number): Promise<Decision> {
+  return decisionSchema.parse(
+    await request(`/${encodeURIComponent(id)}/discard`, { expectedRevision }),
+  );
+}
+
 export async function snoozeDecision(
   id: string,
   expectedRevision: number,

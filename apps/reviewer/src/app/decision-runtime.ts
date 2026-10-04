@@ -5,6 +5,7 @@ import { ConnectorStore } from '../connectors/store.js';
 import { SessionDecisionGateway } from '../decisions/delivery.js';
 import { DecisionService } from '../decisions/service.js';
 import { SqliteDecisionRepository } from '../decisions/sqlite-repository.js';
+import { DecisionDeliveryWorker } from '../decisions/worker.js';
 
 /** Real composition root: no fixtures and no synthetic agent outcomes. */
 export function createDecisionRuntime(configPath: string) {
@@ -18,39 +19,23 @@ export function createDecisionRuntime(configPath: string) {
   const gateway = new SessionDecisionGateway(connections, repository, config.legacyConnectionId);
   const service = new DecisionService(repository, gateway);
   const connectors = new ConnectorRuntime(new ConnectorStore(config.databasePath), connections);
-  let running: Promise<void> | undefined;
   let stopped = false;
-
-  const tick = () => {
-    if (running || stopped) {
-      return running;
-    }
-    running = (async () => {
-      for (const item of service.list()) {
-        if (stopped) {
-          break;
-        }
-        if (
-          item.status === 'queued' ||
-          (item.status === 'delivery_failed' && item.deliveryIssue !== 'unsupported')
-        ) {
-          await service.dispatch(item.id);
-          const current = service.get(item.id);
-          if (
-            current.status === 'delivered' &&
-            current.context.connectionId?.startsWith('connector-')
-          ) {
-            connectors.store.recordDelivery(current.context.connectionId);
-          }
-        }
+  const worker = new DecisionDeliveryWorker(
+    service,
+    (item) => {
+      const id = item.context.connectionId ?? config.legacyConnectionId;
+      return JSON.stringify([connections.get(id)?.id ?? id, item.context.threadId]);
+    },
+    (item) => {
+      const id = item.context.connectionId ?? config.legacyConnectionId;
+      const canonical = connections.get(id)?.id ?? id;
+      if (canonical.startsWith('connector-')) {
+        connectors.store.recordDelivery(canonical);
       }
-    })()
-      .catch(() => console.error('Decision delivery worker failed'))
-      .finally(() => {
-        running = undefined;
-      });
-    return running;
-  };
+    },
+  );
+
+  const tick = () => worker.tick().catch(() => console.error('Decision delivery worker failed'));
 
   let timer: ReturnType<typeof setInterval> | undefined;
   return {
@@ -73,7 +58,7 @@ export function createDecisionRuntime(configPath: string) {
       stopped = true;
       connectors.stop();
       clearInterval(timer);
-      await running;
+      await worker.close();
       repository.close();
       connectors.store.close();
     },

@@ -672,16 +672,18 @@
       "investigating": "추가 조사 중",
       "applied": "반영 보고됨",
       "delivery_failed": "전달 실패",
-      "superseded": "요청이 대체됨"
+      "superseded": "요청이 대체됨",
+      "discarded": "폐기됨"
     },
     "explanation": {
       "awaiting_answer": "판단이 필요한 요청입니다.",
       "queued": "답변을 저장했어요. 대상 작업에 전달할 차례입니다.",
-      "delivered": "답변이 에이전트에 전달됐어요. 실제 반영 보고를 기다리고 있습니다.",
+      "delivered": "답변이 원래 대화에 전달됐어요. 이후 작업은 해당 대화에서 확인할 수 있어요.",
       "investigating": "추가 조사가 진행 중이에요. 결과가 준비되면 같은 요청에서 확인할 수 있어요.",
       "applied": "아래는 에이전트가 보고한 반영 내용이에요. 구현의 정확성을 별도로 검증한 결과는 아니에요.",
       "delivery_failed": "내용을 다시 작성할 필요는 없어요. 저장된 답변으로 전달을 다시 시도할 수 있어요.",
-      "superseded": "요청 이후 작업 상황이 바뀌었어요. 이 요청에는 더 이상 답변을 적용하지 않습니다."
+      "superseded": "요청 이후 작업 상황이 바뀌었어요. 이 요청에는 더 이상 답변을 적용하지 않습니다.",
+      "discarded": "사용자가 이 질문을 폐기했어요. 답변은 전송되지 않았습니다."
     },
     "event": {
       "opened": "에이전트가 요청함",
@@ -695,7 +697,8 @@
       "superseded": "요청이 대체됨",
       "snoozed": "나중에 보기로 보관함",
       "woken": "답변할 요청으로 돌아옴",
-      "recommendation_updated": "추천 정보가 보완됐어요"
+      "recommendation_updated": "추천 정보가 보완됐어요",
+      "discarded": "사용자가 질문을 폐기함"
     },
     "later": "나중에 보기",
     "noAnswersNeeded": "지금 답변할 요청이 없어요",
@@ -711,23 +714,28 @@
     "independentWork": "독립적인 작업은 계속 진행",
     "next": {
       "queued": "이제 시스템이 답변을 전달할 차례예요",
-      "delivered": "에이전트가 답변을 받은 뒤 후속 보고를 기다리고 있어요",
+      "delivered": "원래 대화에서 이후 작업을 확인할 수 있어요",
       "investigating": "에이전트가 추가 조사 중이에요",
       "applied": "에이전트의 반영 보고가 도착했어요",
       "delivery_failed": "답변은 저장됐지만 전달을 확인하지 못했어요",
-      "superseded": "이 요청은 더 이상 답변할 필요가 없어요"
+      "superseded": "이 요청은 더 이상 답변할 필요가 없어요",
+      "discarded": "폐기한 질문입니다"
     },
     "recommendationUnavailable": "추천을 보류한 이유",
     "recommendationWithheld": "추천 보류",
     "checkReceipt": "수신 여부 다시 확인",
     "deliveryIssue": {
       "offline": "답변은 저장됐어요. 연결이 복구되면 원래 작업을 확인하고 전달할게요.",
-      "busy": "대화에서 진행 중인 작업이 끝나면 다시 확인할게요. 작업 방향이 바뀌었다면 전달을 멈춰요.",
+      "busy": "대화가 진행 중이에요. 대화가 쉬는 동안 저장된 답변을 전달합니다.",
       "unsupported": "이 연결에서는 안전한 답변 전달에 필요한 기능을 사용할 수 없어요. 연결 설정을 확인해 주세요.",
       "unconfirmed": "전달했을 가능성이 있어 수신 여부를 확인 중이에요. 확인 전에는 같은 답변을 다시 보내지 않아요."
     },
     "connections": "연결된 컴퓨터",
-    "checkConnection": "연결 확인"
+    "checkConnection": "연결 확인",
+    "discard": "질문 폐기",
+    "discardTitle": "이 질문을 폐기할까요?",
+    "discardHelp": "답변 없이 지난 요청으로 이동합니다. 기록은 남으며, 에이전트에 답변을 보내거나 작업을 중단하지는 않습니다.",
+    "keepRequest": "질문 유지"
   },
   "connectors": {
     "title": "연결된 컴퓨터",

@@ -11,6 +11,7 @@ import { ConnectionSettingsLink } from '../../components/connection-settings-lin
 import { LocalTime } from '../../components/local-time';
 import { DecisionAnswerForm, rebaseDecisionDraft } from './decision-answer';
 import { retryDecision, snoozeDecision } from './decision-api';
+import { DecisionDiscard } from './decision-discard';
 import { DecisionDisclosure } from './decision-disclosure';
 
 export function DecisionDetail({
@@ -76,17 +77,20 @@ export function DecisionDetail({
             <Badge variant="secondary">{deferred ? t('later') : t(`status.${item.status}`)}</Badge>
           </div>
           {awaiting && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => {
-                void act('snooze');
-              }}
-            >
-              <Clock3Icon data-icon="inline-start" />
-              {t(deferred ? 'wake' : 'snooze')}
-            </Button>
+            <div className="flex items-center gap-1">
+              <DecisionDiscard item={item} onChange={onChange} />
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  void act('snooze');
+                }}
+              >
+                <Clock3Icon data-icon="inline-start" />
+                {t(deferred ? 'wake' : 'snooze')}
+              </Button>
+            </div>
           )}
         </div>
         <h2

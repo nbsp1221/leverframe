@@ -86,7 +86,40 @@ function setup() {
 }
 
 describe('ACP migration safeguards', () => {
-  it('rechecks the checkpoint after loading an adapter and never resumes a cancelled origin', async () => {
+  it('keeps an answer pending when its configured session is temporarily unavailable', async () => {
+    const f = setup();
+    (f.connection.sessions as Map<string, string>).clear();
+    expect(await f.gateway.inspect(f.item.context)).toBe('offline');
+    f.answer();
+    await f.service.dispatch(f.item.id);
+    expect(f.service.get(f.item.id).status).toBe('delivery_failed');
+    expect(f.service.get(f.item.id).deliveryIssue).toBe('offline');
+    expect(f.sends()).toBe(0);
+  });
+  it('delivers two questions from one turn even after the first response starts a new turn', async () => {
+    const f = setup();
+    const second = {
+      ...structuredClone(f.item),
+      id: 'second-question',
+      mode: 'nonblocking' as const,
+      assumption: 'Independent work is authorized',
+      continuing: 'Other work',
+    };
+    f.repository.insert(second);
+    f.answer();
+    f.service.answer(second.id, {
+      id: 'second-answer',
+      expectedRevision: second.revision,
+      text: 'Continue within this scope',
+      intent: 'decide',
+    });
+    await f.service.dispatch(f.item.id);
+    await f.service.dispatch(second.id);
+    expect(f.service.get(f.item.id).status).toBe('delivered');
+    expect(f.service.get(second.id).status).toBe('delivered');
+    expect(f.sends()).toBe(2);
+  });
+  it('does not discard questions after another turn, but waits on a cancelled origin', async () => {
     const f = setup();
     f.answer();
     f.onPrepare(() => {
@@ -94,14 +127,15 @@ describe('ACP migration safeguards', () => {
       return Promise.resolve();
     });
     await f.service.dispatch(f.item.id);
-    expect(f.sends()).toBe(0);
-    expect(f.service.get(f.item.id).status).toBe('superseded');
+    expect(f.sends()).toBe(1);
+    expect(f.service.get(f.item.id).status).toBe('delivered');
     const cancelled = setup();
     cancelled.answer();
     cancelled.snapshot.state = 'cancelled';
     await cancelled.service.dispatch(cancelled.item.id);
     expect(cancelled.sends()).toBe(0);
-    expect(cancelled.service.get(cancelled.item.id).status).toBe('superseded');
+    expect(cancelled.service.get(cancelled.item.id).status).toBe('delivery_failed');
+    expect(cancelled.service.get(cancelled.item.id).deliveryIssue).toBe('offline');
   });
   it('automatically recovers busy targets but reports missing protocol capability', async () => {
     const f = setup();

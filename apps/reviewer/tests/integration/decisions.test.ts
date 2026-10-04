@@ -51,6 +51,27 @@ const answer = {
 };
 
 describe('decision ownership through real storage and application policy', () => {
+  it('discards only unanswered requests, retains history, and rejects competing stale answers', async () => {
+    const { service, sent } = setup();
+    const previous = service.get('dr-101');
+    const discarded = service.discard(previous.id, previous.revision);
+    expect(discarded.status).toBe('discarded');
+    expect(discarded.question).toBe(previous.question);
+    expect(discarded.events.at(-1)?.kind).toBe('discarded');
+    expect(() => service.answer(previous.id, answer)).toThrow(DecisionConflict);
+    await service.dispatch(previous.id);
+    expect(sent).toHaveLength(0);
+    const other = service.get('dr-102');
+    service.answer(other.id, {
+      ...answer,
+      expectedRevision: other.revision,
+      optionId: undefined,
+      text: 'Saved',
+    });
+    expect(() => service.discard(other.id, service.get(other.id).revision)).toThrow(
+      DecisionConflict,
+    );
+  });
   it('stores an answer before delivery and never treats a transport receipt as application', async () => {
     const { service, sent } = setup();
     service.answer('dr-101', answer);

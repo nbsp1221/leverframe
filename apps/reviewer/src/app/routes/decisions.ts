@@ -46,6 +46,47 @@ export function registerDecisionRoutes(
   app.openapi(
     createRoute({
       method: 'post',
+      path: '/api/v1/decisions/{id}/discard',
+      operationId: 'discardDecision',
+      tags: ['Decisions'],
+      request: {
+        params,
+        body: {
+          required: true,
+          content: json(z.object({ expectedRevision: z.number().int().nonnegative() })),
+        },
+      },
+      responses: {
+        200: {
+          description: 'Unanswered request discarded; history retained',
+          content: json(decisionSchema),
+        },
+        ...errors,
+      },
+    }),
+    (c) => {
+      if (!service) {
+        return c.json({ error: 'not_configured' }, 503);
+      }
+      try {
+        return c.json(
+          service.discard(c.req.valid('param').id, c.req.valid('json').expectedRevision),
+          200,
+        );
+      } catch (cause) {
+        if (cause instanceof DecisionMissing) {
+          return c.json({ error: 'not_found' }, 404);
+        }
+        if (cause instanceof DecisionConflict) {
+          return c.json({ error: cause.message }, 409);
+        }
+        throw cause;
+      }
+    },
+  );
+  app.openapi(
+    createRoute({
+      method: 'post',
       path: '/api/v1/decisions',
       operationId: 'createDecision',
       security: [{ DecisionAgentToken: [] }],

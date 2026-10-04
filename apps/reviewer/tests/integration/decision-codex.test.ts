@@ -257,7 +257,7 @@ describe('Codex request boundary', () => {
     expect(service.get(item.id).answers).toEqual(saved.answers);
   });
 
-  it('does not send to a busy, changed or unregistered conversation', async () => {
+  it('waits for idle and delivers after later turns without changing the original target', async () => {
     const f = fixture();
     const item = await f.service.create(question, (id) => f.agent.resolve(id));
     f.service.answer(item.id, {
@@ -273,8 +273,8 @@ describe('Codex request boundary', () => {
     f.thread.turns.push({ id: 'unrelated-turn', status: 'completed', items: [] });
     f.service.retry(item.id, f.service.get(item.id).revision);
     await f.service.dispatch(item.id);
-    expect(f.service.get(item.id).status).toBe('superseded');
-    expect(f.starts()).toBe(0);
+    expect(f.service.get(item.id).status).toBe('delivered');
+    expect(f.starts()).toBe(1);
     await expect(f.agent.resolve('unregistered')).rejects.toThrow('session_not_allowed');
   });
 

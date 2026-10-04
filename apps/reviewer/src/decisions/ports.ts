@@ -44,9 +44,9 @@ export interface AgentOutcome {
 }
 
 export interface AgentGateway {
-  /** Check cancellation and scope changes before delivery. Never infer authority from silence. */
+  /** Check the original target before delivery. Never infer authority from silence. */
   inspect(context: Decision['context']): Promise<'ready' | 'offline' | 'superseded'>;
-  /** Accept into the target conversation, not "apply the decision". Enforce expected task revision again at send time. */
+  /** Accept into the target conversation, not "apply the decision". Check identity and readiness again at send time. */
   deliver(delivery: AnswerDelivery): Promise<void>;
 }
 

@@ -61,12 +61,12 @@ export class SessionDecisionGateway implements AgentGateway {
     };
   }
 
-  inspect(context: Decision['context']): Promise<'ready' | 'superseded'> {
+  inspect(context: Decision['context']): Promise<'ready' | 'offline'> {
     try {
       this.target(context);
       return Promise.resolve('ready');
     } catch {
-      return Promise.resolve('superseded');
+      return Promise.resolve('offline');
     }
   }
 
@@ -78,10 +78,7 @@ export class SessionDecisionGateway implements AgentGateway {
     return count === 1;
   }
 
-  private assertReady(snapshot: SessionSnapshot, revision: string): void {
-    if (snapshot.revision !== revision || snapshot.state === 'cancelled') {
-      throw new AgentDeliveryError('superseded');
-    }
+  private assertReady(snapshot: SessionSnapshot): void {
     if (snapshot.state !== 'ready') {
       throw new AgentDeliveryError(snapshot.state === 'busy' ? 'busy' : 'offline');
     }
@@ -114,11 +111,11 @@ export class SessionDecisionGateway implements AgentGateway {
       if (reserved) {
         throw new AgentDeliveryError('unconfirmed');
       }
-      this.assertReady(before, delivery.context.taskRevision);
+      this.assertReady(before);
       const prepared = await connection.channel.prepare(
         sessionId,
         connection.sessions.get(sessionId)!,
-        delivery.context.taskRevision,
+        before.revision,
       );
       try {
         // Loading an adapter can take time. Recheck the actual target immediately before send.
@@ -127,7 +124,7 @@ export class SessionDecisionGateway implements AgentGateway {
           confirmed();
           return;
         }
-        this.assertReady(current, delivery.context.taskRevision);
+        this.assertReady(current);
         const hash = createHash('sha256').update(message).digest('hex');
         reserved = true;
         if (!this.journal.reserveDelivery(delivery.id, hash)) {
