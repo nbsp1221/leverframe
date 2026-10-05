@@ -35,6 +35,7 @@ const args = parseArgs({
   options: {
     'url': { type: 'string' },
     'code': { type: 'string' },
+    'locale': { type: 'string' },
     'name': { type: 'string' },
     'port': { type: 'string' },
     'socket': { type: 'string' },
@@ -50,12 +51,30 @@ function writePrivate(path: string, data: unknown) {
 
 function alive(): boolean {
   try {
-    const pid = Number(readFileSync(pidFile, 'utf8'));
-    if (!Number.isInteger(pid) || pid < 2) {
-      return false;
+    const recorded = readFileSync(pidFile, 'utf8');
+    const pid = Number(recorded);
+    if (Number.isInteger(pid) && pid >= 2 && ownsPid(pid)) {
+      return true;
     }
+    // Remove only our stale record, never signal the process that reused this PID.
+    if (readFileSync(pidFile, 'utf8') === recorded) {
+      rmSync(pidFile);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function ownsPid(pid: number): boolean {
+  try {
     process.kill(pid, 0);
-    return true;
+    const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+    return (
+      realpathSync(`/proc/${pid}/exe`) === realpathSync(process.execPath) &&
+      argv[1] === join(assets, 'connector.js') &&
+      argv[2] === 'run'
+    );
   } catch {
     return false;
   }
@@ -64,6 +83,7 @@ function alive(): boolean {
 async function main() {
   mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
   if (command === 'connect') {
+    const locale = z.enum(['en', 'ko']).parse(args.values.locale ?? 'ko');
     const previous = existsSync(configFile)
       ? connectorClientConfigSchema.parse(JSON.parse(readFileSync(configFile, 'utf8')))
       : undefined;
@@ -78,8 +98,7 @@ async function main() {
       }
       if (alive()) {
         const pid = Number(readFileSync(pidFile, 'utf8'));
-        const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-        if (!cmdline.includes(join(assets, 'connector.js')) || !cmdline.includes('\0run')) {
+        if (!ownsPid(pid)) {
           throw new Error('pid_identity_changed');
         }
         process.kill(pid, 'SIGTERM');
@@ -131,7 +150,7 @@ async function main() {
     writePrivate(join(skillPath, 'connection.json'), {
       url: `http://127.0.0.1:${config.port}`,
       token: config.localToken,
-      uiUrl: `${url}/ko/decisions`,
+      uiUrl: `${url}/${locale}/decisions`,
     });
     console.log(
       'Connected. Skill installed for this user. Start the connector to receive questions.',
@@ -184,8 +203,7 @@ async function main() {
     if (alive()) {
       const pid = Number(readFileSync(pidFile, 'utf8'));
       // On Linux, validate ownership before signaling a PID that could have been reused.
-      const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-      if (!cmdline.includes(join(assets, 'connector.js')) || !cmdline.includes('\0run')) {
+      if (!ownsPid(pid)) {
         throw new Error('pid_identity_changed');
       }
       process.kill(pid, 'SIGTERM');

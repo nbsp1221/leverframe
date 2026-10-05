@@ -41,6 +41,7 @@ test('onboarding connects a computer without asking for a project or session', a
   await page.getByRole('button', { name: 'Connect computer', exact: true }).first().click();
   const command = page.getByRole('textbox', { name: 'Install and connect command' });
   await expect(command).toHaveValue(/download\/install\.sh/);
+  await expect(command).toHaveValue(/'en'$/);
   await expect(page.getByRole('combobox')).toHaveCount(0);
   expect((await new AxeBuilder({ page }).include('main').analyze()).violations).toEqual([]);
   connected = true;

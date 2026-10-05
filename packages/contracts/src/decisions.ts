@@ -119,6 +119,10 @@ export const decisionCreateSchema = decisionSchema
     title: z.string().trim().min(1).max(200),
     question: z.string().trim().min(1).max(4000),
     why: z.string().trim().min(1).max(4000),
+    // Restrict new inputs without making older persisted questions unreadable.
+    options: decisionSchema.shape.options.element
+      .extend({ id: z.string().min(1).max(100) })
+      .array(),
   })
   .strict()
   .refine((value) => Boolean(value.threadId) !== Boolean(value.source), {

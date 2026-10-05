@@ -130,6 +130,51 @@ function fixture(path = ':memory:') {
 }
 
 describe('Codex request boundary', () => {
+  it('rejects unanswerable new option IDs, accepts the boundaries, and still reads legacy records', async () => {
+    const f = fixture();
+
+    const post = (path: string, body: unknown) =>
+      f.app.request(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'authorization': 'Bearer test-token' },
+        body: JSON.stringify(body),
+      });
+
+    for (const id of ['', 'x'.repeat(101)]) {
+      const invalid = { ...question, options: [{ ...question.options[0]!, id }] };
+      expect((await post('/api/v1/decisions', invalid)).status).toBe(400);
+    }
+    expect(f.service.list()).toHaveLength(0);
+    for (const id of ['x', 'x'.repeat(100)]) {
+      const valid = {
+        ...question,
+        key: `boundary-${id.length}`,
+        options: [{ ...question.options[0]!, id }],
+      };
+      const created = await post('/api/v1/decisions', valid);
+      expect(created.status).toBe(200);
+      const item = decisionSchema.parse(await created.json());
+      expect(
+        (
+          await post(`/api/v1/decisions/${item.id}/answers`, {
+            id: `answer-${id.length}`,
+            expectedRevision: 0,
+            intent: 'decide',
+            optionId: id,
+            text: '',
+          })
+        ).status,
+      ).toBe(200);
+    }
+    const legacy = {
+      ...f.service.list()[0]!,
+      id: 'legacy',
+      options: [{ ...question.options[0]!, id: 'x'.repeat(101) }],
+    };
+    f.repository.insert(legacy);
+    expect(decisionSchema.parse(f.service.get('legacy')).options[0]?.id).toHaveLength(101);
+  });
+
   it('rejects omitted, contradictory and multiple recommendations while allowing an explicit evidence gap', async () => {
     const f = fixture();
 

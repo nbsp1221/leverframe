@@ -13,7 +13,7 @@
     "build": "tsdown && node scripts/copy-scalar-browser.mjs && pnpm build:connector",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
-    "test:dist": "node scripts/check-dist.mjs",
+    "test:dist": "node scripts/check-dist.mjs && node scripts/check-connector.mjs",
     "test:e2e": "vitest run --project e2e",
     "test:integration": "vitest run --project integration",
     "test:unit": "vitest run --project unit",

@@ -21,7 +21,7 @@ import {
   PlusIcon,
   RefreshCwIcon,
 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LocalTime } from '../../components/local-time';
 import { PageFrame } from '../../components/page-frame';
@@ -74,6 +74,7 @@ function CopyText({ text, label }: { text: string; label: string }) {
 
 export function ConnectorWorkspace() {
   const t = useTranslations('connectors');
+  const locale = useLocale();
   const [items, setItems] = useState<Connector[] | null>(null);
   const [error, setError] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -123,7 +124,7 @@ export function ConnectorWorkspace() {
 
       const origin = window.location.origin;
       setCommand(
-        `curl -fsS ${quote(`${origin}/api/v1/connectors/download/install.sh`)} | sh -s -- ${quote(origin)} ${quote(next.code)}`,
+        `curl -fsS ${quote(`${origin}/api/v1/connectors/download/install.sh`)} | sh -s -- ${quote(origin)} ${quote(next.code)} ${quote(locale)}`,
       );
       setError(false);
     } catch {
