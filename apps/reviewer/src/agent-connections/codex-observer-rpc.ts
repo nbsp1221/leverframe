@@ -4,7 +4,7 @@ export interface CodexRpc {
   call(method: string, params: Record<string, unknown>): Promise<unknown>;
 }
 
-/** Connects to the existing Desktop daemon; never starts or takes over a Codex runtime. */
+/** Connects to the existing Codex app-server; never starts or takes over a Codex runtime. */
 export class CodexObserverRpc implements CodexRpc {
   constructor(private readonly socketPath: string) {}
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {

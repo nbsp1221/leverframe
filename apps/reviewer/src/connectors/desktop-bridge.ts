@@ -1,9 +1,9 @@
 import { createInterface } from 'node:readline';
 import WebSocket from 'ws';
 
-// Executable CODEX_PATH shim for codex-acp. Owns only this socket, never the Desktop daemon.
+// Executable CODEX_PATH shim for codex-acp. Owns only this socket, never the Codex app-server.
 if (process.argv[2] !== 'app-server' || !process.env.LEVERFRAME_CODEX_SOCKET) {
-  process.stderr.write('Existing Codex Desktop attachment required\n');
+  process.stderr.write('Existing Codex app-server attachment required\n');
   process.exit(64);
 }
 const socket = new WebSocket(`ws+unix://${process.env.LEVERFRAME_CODEX_SOCKET}:/`, {

@@ -102,7 +102,12 @@ test.describe('frontend invariants', () => {
   for (const fixture of representativeFixtures) {
     test(`${fixture} renders without hydration, page, or same-origin resource failures`, async ({
       page,
+      baseURL,
     }) => {
+      if (!baseURL) {
+        throw new Error('A frontend test base URL is required');
+      }
+      const origin = new URL(baseURL).origin;
       const pageErrors: string[] = [];
       const failedResponses: string[] = [];
 
@@ -110,7 +115,7 @@ test.describe('frontend invariants', () => {
       page.on('response', (response) => {
         const url = new URL(response.url());
         if (
-          url.origin === 'http://127.0.0.1:16721' &&
+          url.origin === origin &&
           response.status() >= 400 &&
           !url.pathname.startsWith('/api/')
         ) {

@@ -1,6 +1,6 @@
 import { type Page, expect, test } from '@playwright/test';
 
-const reviewerUrl = 'http://127.0.0.1:16722';
+const reviewerUrl = process.env.LEVERFRAME_E2E_REVIEWER_URL ?? 'http://127.0.0.1:16722';
 
 async function forwardApi(page: Page) {
   await page.route('**/api/v1/**', async (route) => {
