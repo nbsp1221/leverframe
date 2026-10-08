@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GitHubAppClient,
   canManageRepositoryRole,
@@ -69,7 +69,164 @@ describe('GitHub retry classification', () => {
 
   it('does not retry authentication or validation failures', () => {
     expect(githubRetryDelayMilliseconds({ status: 401 }, 0)).toBeUndefined();
+    expect(githubRetryDelayMilliseconds({ status: 404 }, 0)).toBeUndefined();
     expect(githubRetryDelayMilliseconds({ status: 422 }, 0)).toBeUndefined();
+  });
+});
+
+describe('Check Run start recovery', () => {
+  const input = { checkRunId: 101, installationId: 42, repository: 'example/project' };
+  const route = 'PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}';
+
+  beforeEach(() => {
+    githubMocks.installationRequest.mockReset();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    githubMocks.installationRequest.mockReset();
+  });
+
+  it('waits 1s and 2s for start-only 404s and continues once with the same request', async () => {
+    githubMocks.installationRequest
+      .mockRejectedValueOnce(Object.assign(new Error('missing'), { status: 404 }))
+      .mockRejectedValueOnce(Object.assign(new Error('missing'), { status: 404 }))
+      .mockResolvedValueOnce({ data: {} });
+    const continueReview = vi.fn();
+    const pending = createAppClient().startCheckRun(input).then(continueReview);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(githubMocks.installationRequest).toHaveBeenCalledTimes(1);
+    expect(continueReview).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(githubMocks.installationRequest).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(githubMocks.installationRequest).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+
+    expect(githubMocks.installationRequest).toHaveBeenCalledTimes(3);
+    expect(continueReview).toHaveBeenCalledOnce();
+    const parameters: unknown = githubMocks.installationRequest.mock.calls[0]?.[1];
+    expect(parameters).toMatchObject({
+      check_run_id: 101,
+      owner: 'example',
+      repo: 'project',
+      started_at: '2026-01-01T00:00:00.000Z',
+      status: 'in_progress',
+    });
+    for (const call of githubMocks.installationRequest.mock.calls) {
+      expect(call[0]).toBe(route);
+      expect(call[1]).toBe(parameters);
+    }
+  });
+
+  it('stops after three persistent 404s and records safe diagnostics for every attempt', async () => {
+    const error = Object.assign(new Error('secret error body'), {
+      request: { headers: { authorization: 'secret-auth' }, url: 'secret-url' },
+      response: {
+        data: { secret: 'secret-response' },
+        headers: { 'x-github-request-id': 'ABCD:1234:5678', 'set-cookie': 'secret-cookie' },
+      },
+      status: 404,
+    });
+    githubMocks.installationRequest.mockRejectedValue(error);
+    const continueReview = vi.fn();
+    const pending = expect(
+      createAppClient().startCheckRun(input).then(continueReview),
+    ).rejects.toBe(error);
+    await vi.runAllTimersAsync();
+    await pending;
+
+    expect(githubMocks.installationRequest).toHaveBeenCalledTimes(3);
+    expect(continueReview).not.toHaveBeenCalled();
+    const logs = vi
+      .mocked(console.warn)
+      .mock.calls.map(([line]) => JSON.parse(String(line)) as unknown);
+    expect(logs).toEqual(
+      [0, 1, 3].map((seconds, index) => ({
+        event: 'github_check_run_start_failed',
+        attempt: index + 1,
+        checkRunId: 101,
+        requestId: 'ABCD:1234:5678',
+        route,
+        status: 404,
+        timestamp: `2026-01-01T00:00:0${seconds}.000Z`,
+      })),
+    );
+    expect(JSON.stringify(logs)).not.toContain('secret');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([401, 403, 422])('does not retry a permanent %i error', async (status) => {
+    const error = Object.assign(new Error('permanent'), { status });
+    githubMocks.installationRequest.mockRejectedValue(error);
+    await expect(createAppClient().startCheckRun(input)).rejects.toBe(error);
+    expect(githubMocks.installationRequest).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(JSON.parse(String(vi.mocked(console.warn).mock.calls[0]?.[0]))).toMatchObject({
+      requestId: null,
+      status,
+    });
+  });
+
+  it('repeats the same status update after a lost response without starting another retry budget', async () => {
+    let startRequests = 0;
+    githubMocks.installationRequest.mockImplementation(() => {
+      startRequests += 1;
+      if (startRequests === 1) {
+        return Promise.reject(Object.assign(new Error('response lost'), { code: 'ECONNRESET' }));
+      }
+      if (startRequests === 2) {
+        return Promise.reject(Object.assign(new Error('missing'), { status: 404 }));
+      }
+      return Promise.resolve({ data: {} });
+    });
+    const pending = createAppClient().startCheckRun(input);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(startRequests).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(startRequests).toBe(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pending;
+    expect(startRequests).toBe(3);
+    const first: unknown = githubMocks.installationRequest.mock.calls[0]?.[1];
+    expect(githubMocks.installationRequest.mock.calls.every((call) => call[1] === first)).toBe(
+      true,
+    );
+  });
+
+  it('omits malformed request IDs from diagnostics', async () => {
+    githubMocks.installationRequest.mockRejectedValue(
+      Object.assign(new Error('invalid'), {
+        response: { headers: { 'x-github-request-id': 'unsafe\nheader' } },
+        status: 422,
+      }),
+    );
+    await expect(createAppClient().startCheckRun(input)).rejects.toThrow('invalid');
+    expect(JSON.parse(String(vi.mocked(console.warn).mock.calls[0]?.[0])) as unknown).toMatchObject(
+      {
+        requestId: null,
+      },
+    );
+  });
+
+  it('does not extend 404 retries to Check Run completion', async () => {
+    const error = Object.assign(new Error('missing'), { status: 404 });
+    githubMocks.installationRequest.mockRejectedValue(error);
+    await expect(
+      createAppClient().completeCheckRun({
+        ...input,
+        conclusion: 'success',
+        output: { summary: 'No defects', title: 'Review complete' },
+      }),
+    ).rejects.toBe(error);
+    expect(githubMocks.installationRequest).toHaveBeenCalledOnce();
+    expect(console.warn).not.toHaveBeenCalled();
   });
 });
 
