@@ -1,4 +1,5 @@
 import { env } from 'node:process';
+import { connectorMaximumResultBytes } from '@repo/contracts/connectors';
 
 const maximumRequestBytes = 1024 * 1024;
 const forwardedRequestHeaders = ['accept', 'content-type', 'last-event-id'] as const;
@@ -28,6 +29,21 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
     return Response.json({ error: 'Invalid API path.' }, { status: 400 });
   }
   const incoming = new URL(request.url);
+  if (
+    path[0] === 'connectors' &&
+    !['GET', 'HEAD'].includes(request.method) &&
+    path[1] !== 'agent' &&
+    path[1] !== 'enroll'
+  ) {
+    const origin = request.headers.get('origin');
+    if (
+      origin &&
+      origin !== `${incoming.protocol}//${request.headers.get('host') ?? incoming.host}`
+    ) {
+      return Response.json({ error: 'origin_rejected' }, { status: 403 });
+    }
+  }
+
   const target = new URL(`api/v1/${path.map(encodeURIComponent).join('/')}`, base);
   target.search = incoming.search;
   const headers = new Headers();
@@ -37,10 +53,20 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
       headers.set(name, value);
     }
   }
+  if (path[0] === 'connectors') {
+    const authorization = request.headers.get('authorization');
+    if (authorization) {
+      headers.set('authorization', authorization);
+    }
+  }
   let body: ArrayBuffer | undefined;
   if (!['GET', 'HEAD'].includes(request.method)) {
     body = await request.arrayBuffer();
-    if (body.byteLength > maximumRequestBytes) {
+    const limit =
+      path[0] === 'connectors' && path[1] === 'agent' && path[2] === 'results'
+        ? connectorMaximumResultBytes
+        : maximumRequestBytes;
+    if (body.byteLength > limit) {
       return Response.json({ error: 'Request body is too large.' }, { status: 413 });
     }
   }

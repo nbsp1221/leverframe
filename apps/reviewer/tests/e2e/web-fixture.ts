@@ -1,12 +1,17 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLeverframeServer } from '../../src/app/server.js';
 import { CredentialStore } from '../../src/github/credentials.js';
 import { JobDatabase } from '../../src/jobs/database.js';
+import { createDecisionPreview } from '../fixtures/decision-runtime.js';
 
-const root = mkdtempSync(join(tmpdir(), 'leverframe-e2e-'));
+const persistentRoot = process.env.LEVERFRAME_PREVIEW_ROOT;
+const root = persistentRoot ?? mkdtempSync(join(tmpdir(), 'leverframe-e2e-'));
+mkdirSync(root, { recursive: true });
+const decisionPreview = createDecisionPreview(join(root, 'decisions.sqlite'));
+const port = Number(process.env.LEVERFRAME_PREVIEW_PORT ?? '16722');
 const dataRoot = join(root, 'data');
 const credentialsDirectory = join(dataRoot, 'credentials');
 const credentials = new CredentialStore(credentialsDirectory);
@@ -57,11 +62,10 @@ database.enqueuePullRequest({
   repository: 'e2e/example',
 });
 const job = database.claimNextJob();
-if (job === undefined) {
-  throw new Error('unable to claim E2E seed job');
+if (job !== undefined) {
+  database.updateJob({ id: job.id, state: 'DONE', expectedStates: ['CHECKING_OUT'] });
+  database.recordReviewArtifact(job.id, result);
 }
-database.updateJob({ id: job.id, state: 'DONE', expectedStates: ['CHECKING_OUT'] });
-database.recordReviewArtifact(job.id, result);
 
 const server = createLeverframeServer(
   {
@@ -72,9 +76,9 @@ const server = createLeverframeServer(
     jobsDirectory: join(dataRoot, 'jobs'),
     githubAppName: 'e2e',
     model: 'e2e-model',
-    port: 16722,
-    uiBaseUrl: 'http://127.0.0.1:16722',
-    webhookUrl: 'http://127.0.0.1:16722/webhooks/github',
+    port,
+    uiBaseUrl: `http://127.0.0.1:${port}`,
+    webhookUrl: `http://127.0.0.1:${port}/webhooks/github`,
     reasoningEffort: 'low',
     resourcesDirectory: fileURLToPath(new URL('../../resources', import.meta.url)),
     sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
@@ -86,16 +90,20 @@ const server = createLeverframeServer(
   },
   database,
   credentials,
+  { decisions: decisionPreview.service },
 );
 
-server.listen(16722, '127.0.0.1', () => {
-  console.log('E2E_REVIEWER_READY http://127.0.0.1:16722');
+server.listen(port, '127.0.0.1', () => {
+  console.log(`E2E_REVIEWER_READY http://127.0.0.1:${port}`);
 });
 
 function shutdown() {
   server.close(() => {
+    decisionPreview.close();
     database.close();
-    rmSync(root, { recursive: true, force: true });
+    if (!persistentRoot) {
+      rmSync(root, { recursive: true, force: true });
+    }
     process.exit(0);
   });
 }

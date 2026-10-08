@@ -9,6 +9,8 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
 import { errorResponseSchema, evaluationHistorySchema, reviewDetailSchema } from '@repo/contracts';
+import type { ConnectorRuntime } from '../connectors/runtime.js';
+import type { DecisionService } from '../decisions/service.js';
 import type { ManualCommand } from '../jobs/command.js';
 import type {
   JobDatabase,
@@ -17,6 +19,7 @@ import type {
 } from '../jobs/database.js';
 import { findingFingerprint } from '../review/result.js';
 import { EvaluationConflictError } from '../storage/evaluation-repository.js';
+import type { DecisionRegistration } from './routes/decisions.js';
 
 export const pageSize = 20 as const;
 export const historyLimit = 100;
@@ -32,6 +35,9 @@ export type Observation = {
 export type Observations = Record<Dependency, Observation>;
 
 export interface ServerHooks {
+  decisions?: DecisionService;
+  connectors?: ConnectorRuntime;
+  decisionRegistration?: DecisionRegistration | undefined;
   isSandboxAvailable?: () => boolean | Promise<boolean>;
   isWorkerRunning?: () => boolean | Promise<boolean>;
   onJobQueued?: (job: PullRequestJobInput) => void;

@@ -1,6 +1,7 @@
 .git
 .gitignore
 .leverframe
+**/.leverframe
 .internal
 coverage
 dist

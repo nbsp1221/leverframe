@@ -94,7 +94,9 @@ describe('agent-readable API documentation', () => {
     expect(document.servers).toEqual([
       { url: '/', description: 'Same-origin private Leverframe deployment' },
     ]);
-    expect(document.components?.securitySchemes).toBeUndefined();
+    expect(document.components?.securitySchemes).toMatchObject({
+      DecisionAgentToken: { type: 'http', scheme: 'bearer' },
+    });
 
     const operationIds = Object.values(document.paths).flatMap((path) =>
       Object.values(path)
@@ -129,10 +131,37 @@ describe('agent-readable API documentation', () => {
         'cleanupDevelopmentRun',
       ]),
     );
-    expect(operationIds).toHaveLength(24);
+    expect(operationIds).toHaveLength(31);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
+      [
+        'post',
+        '/api/v1/decisions/{id}/discard',
+        'discardDecision',
+        ['200', '404', '409', '422', '503'],
+      ],
+      ['post', '/api/v1/decisions', 'createDecision', ['200', '401', '404', '409', '422', '503']],
+      [
+        'post',
+        '/api/v1/decisions/{id}/snooze',
+        'snoozeDecision',
+        ['200', '404', '409', '422', '503'],
+      ],
+      ['get', '/api/v1/decisions', 'listDecisions', ['200', '503']],
+      ['get', '/api/v1/decisions/{id}', 'getDecision', ['200', '404', '422', '503']],
+      [
+        'post',
+        '/api/v1/decisions/{id}/answers',
+        'answerDecision',
+        ['200', '404', '409', '422', '503'],
+      ],
+      [
+        'post',
+        '/api/v1/decisions/{id}/retry',
+        'retryDecision',
+        ['200', '404', '409', '422', '503'],
+      ],
       ['get', '/api/v1/status', 'getLeverframeStatus', ['200']],
       ['get', '/api/v1/reviews', 'listReviews', ['200', '422']],
       ['get', '/api/v1/reviews/metrics', 'getReviewMetrics', ['200']],

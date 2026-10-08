@@ -4,6 +4,8 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig = {
   output: 'standalone' as const,
+  devIndicators: { position: 'bottom-right' as const },
+  distDir: process.env.LEVERFRAME_WEB_DIST_DIR ?? '.next',
   allowedDevOrigins: ['localhost', '127.0.0.1', '100.80.10.10'],
 };
 
