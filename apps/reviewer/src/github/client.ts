@@ -13,7 +13,7 @@ import {
 } from '../review/publication.js';
 import { renderReview } from '../review/result.js';
 import type { GitHubAppCredentials } from './credentials.js';
-import { withGitHubRetry } from './retry.js';
+import { githubRetryDelayMilliseconds, withGitHubRetry } from './retry.js';
 
 const maximumGitHubBodyCharacters = 60_000;
 const githubPageSize = 100;
@@ -807,15 +807,46 @@ export class GitHubAppClient {
   }): Promise<void> {
     const [owner, repository] = splitRepository(input.repository);
     const octokit = await this.#app.getInstallationOctokit(input.installationId);
-    await this.#withRetry(() =>
-      octokit.request('PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}', {
-        check_run_id: input.checkRunId,
-        output: input.output,
-        owner,
-        repo: repository,
-        started_at: new Date().toISOString(),
-        status: input.status,
-      }),
+    const route = 'PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}' as const;
+    const parameters = {
+      check_run_id: input.checkRunId,
+      output: input.output,
+      owner,
+      repo: repository,
+      started_at: new Date().toISOString(),
+      status: input.status,
+    };
+    let attempt = 0;
+    await withGitHubRetry(
+      async () => {
+        try {
+          await octokit.request(route, parameters);
+        } catch (error) {
+          const headers = asRecord(asRecord(asRecord(error)?.response)?.headers);
+          const requestId = headers?.['x-github-request-id'];
+          // Record only selected metadata; Octokit errors may contain authentication headers.
+          console.warn(
+            JSON.stringify({
+              event: 'github_check_run_start_failed',
+              attempt: ++attempt,
+              checkRunId: input.checkRunId,
+              requestId:
+                typeof requestId === 'string' && /^[a-zA-Z0-9:-]{1,200}$/.test(requestId)
+                  ? requestId
+                  : null,
+              route,
+              status: githubErrorStatus(error) ?? null,
+              timestamp: new Date().toISOString(),
+            }),
+          );
+          throw error;
+        }
+      },
+      // A known Check Run may briefly return 404; do not extend this policy to other requests.
+      (error, retryAttempt) =>
+        githubErrorStatus(error) === 404
+          ? 1_000 * 2 ** retryAttempt
+          : githubRetryDelayMilliseconds(error, retryAttempt),
     );
   }
 

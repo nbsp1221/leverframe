@@ -46,12 +46,15 @@ export function githubRetryDelayMilliseconds(error: unknown, attempt: number): n
     : undefined;
 }
 
-export async function withGitHubRetry<T>(operation: () => Promise<T>): Promise<T> {
+export async function withGitHubRetry<T>(
+  operation: () => Promise<T>,
+  retryDelayMilliseconds = githubRetryDelayMilliseconds,
+): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
-      const delayMilliseconds = githubRetryDelayMilliseconds(error, attempt);
+      const delayMilliseconds = retryDelayMilliseconds(error, attempt);
       if (delayMilliseconds === undefined || attempt >= 2) {
         throw error;
       }
