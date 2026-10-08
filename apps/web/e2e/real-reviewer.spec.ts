@@ -1,6 +1,10 @@
 import { type Page, expect, test } from '@playwright/test';
 
-const reviewerUrl = process.env.LEVERFRAME_E2E_REVIEWER_URL ?? 'http://127.0.0.1:16722';
+// The default also exercises trailing-slash normalization in the real contract flows.
+const reviewerUrl = (process.env.LEVERFRAME_E2E_REVIEWER_URL ?? 'http://127.0.0.1:16722/').replace(
+  /\/+$/,
+  '',
+);
 
 async function forwardApi(page: Page) {
   await page.route('**/api/v1/**', async (route) => {
