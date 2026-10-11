@@ -14,18 +14,11 @@ const computer = {
   lastDeliveredAt: null,
 };
 
-test('settings is separate from work navigation and old links reach the same page', async ({
+test('settings has a category index, replaces work navigation, and preserves old connection links', async ({
   page,
 }, testInfo) => {
   await page.route('**/api/v1/connectors', (route) => route.fulfill({ json: { items: [] } }));
-  for (const [path, section, heading] of [
-    ['/en/connections', 'connections', 'Connected computers'],
-    ['/en/settings', 'reviews', 'Code review bot'],
-  ] as const) {
-    await page.goto(path);
-    await expect(page).toHaveURL(new RegExp(`/en/settings/${section}`));
-    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
-  }
+  await page.goto('/en/reviews?fixture=default');
   if (testInfo.project.name === 'mobile') {
     await page.getByRole('button', { name: 'Open navigation' }).click();
   }
@@ -36,13 +29,36 @@ test('settings is separate from work navigation and old links reach the same pag
   await expect(primary.getByRole('link', { name: 'Connected computers', exact: true })).toHaveCount(
     0,
   );
-  await expect(footer.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute(
-    'aria-current',
-    'page',
-  );
   const mainRect = await primary.boundingBox();
   const footerRect = await footer.boundingBox();
   expect(footerRect!.y).toBeGreaterThan(mainRect!.y + mainRect!.height - 1);
+  await footer.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page).toHaveURL(/\/en\/settings\?/);
+  await expect(
+    page.getByRole('heading', { name: 'Settings', level: 1, exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('tablist')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  if (testInfo.project.name === 'mobile') {
+    await expect(page.locator('aside:visible')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
+  } else {
+    await expect(page.locator('aside:visible')).toHaveCount(1);
+    await expect(
+      page.locator('aside').getByRole('link', { name: 'Requests', exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator('aside nav [data-sidebar="menu-button"]')).toHaveCount(2);
+  }
+  await page
+    .getByRole('navigation', { name: 'Settings categories', exact: true })
+    .getByRole('link', { name: /^Code Review Bot/ })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Code review bot', exact: true })).toBeVisible();
+  await page.goto('/en/connections');
+  await expect(page).toHaveURL(/\/en\/settings\/connections/);
+  await expect(
+    page.getByRole('heading', { name: 'Connected computers', exact: true }),
+  ).toBeVisible();
   expect(
     (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
   ).toEqual([]);
@@ -82,6 +98,9 @@ test('first connection guidance distinguishes loading, errors, and an offline re
   await page.getByRole('link', { name: 'Connect computer', exact: true }).click();
   await expect(page).toHaveURL(/settings\/connections/);
   state = 'offline';
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    await page.getByRole('link', { name: 'Back to settings', exact: true }).click();
+  }
   await page.getByRole('link', { name: 'Back to work', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Requests', exact: true })).toBeVisible();
   await expect(page.getByText('Receive questions from Codex here')).toHaveCount(0);
@@ -122,10 +141,17 @@ test('settings round trip preserves a selected request, filters, and unsent answ
     .locator('[data-sidebar="footer"]:visible')
     .getByRole('link', { name: 'Settings', exact: true })
     .click();
-  await expect(page).toHaveURL(/settings\/reviews/);
+  await expect(page).toHaveURL(/\/en\/settings\?/);
+  await page
+    .getByRole('navigation', { name: 'Settings categories' })
+    .getByRole('link', { name: /^Code Review Bot/ })
+    .click();
   await expect(page.getByRole('heading', { name: 'Code review bot', exact: true })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.reload();
+  if (testInfo.project.name === 'mobile') {
+    await page.getByRole('link', { name: 'Back to settings', exact: true }).click();
+  }
   await page.getByRole('link', { name: 'Back to work', exact: true }).click();
   await expect(page).toHaveURL(new RegExp('request=settings-draft&view=attention&q=kept-filter'));
   await expect(input).toHaveValue('Keep this condition while I check settings.');
@@ -150,6 +176,9 @@ test('only an offline delivery offers connection settings and keeps the saved an
   ).toBeVisible();
   await expect(page.getByRole('region', { name: /Your last response/ })).toBeVisible();
   await page.getByRole('link', { name: 'Check connection' }).click();
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    await page.getByRole('link', { name: 'Back to settings', exact: true }).click();
+  }
   await page.getByRole('link', { name: 'Back to work' }).click();
   await expect(page).toHaveURL(new RegExp(`request=${item.id}`));
   issue = 'busy';

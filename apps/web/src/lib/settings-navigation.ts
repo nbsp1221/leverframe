@@ -19,6 +19,9 @@ export function connectionSettingsHref(returnTo: string): string {
   return settingsHref('connections', returnTo);
 }
 
-export function settingsHref(section: 'reviews' | 'connections', returnTo: string): string {
-  return `/settings/${section}?${new URLSearchParams({ returnTo: settingsReturnPath(returnTo) })}`;
+export function settingsHref(
+  section: 'reviews' | 'connections' | undefined,
+  returnTo: string,
+): string {
+  return `/settings${section ? `/${section}` : ''}?${new URLSearchParams({ returnTo: settingsReturnPath(returnTo) })}`;
 }

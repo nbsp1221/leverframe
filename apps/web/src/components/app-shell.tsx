@@ -37,6 +37,7 @@ import { type CSSProperties, useEffect, useState } from 'react';
 import { Link, usePathname, useRouter } from '../i18n/navigation';
 import { confirmDirtyNavigation } from '../lib/dirty-navigation';
 import { useSettingsHref } from './connection-settings-link';
+import { SettingsSidebar } from './settings-navigation';
 import { WorkspaceNavigation, getWorkspaceDestination } from './workspace-navigation';
 
 const shellSize = {
@@ -59,6 +60,11 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
 
 function AppSidebar() {
   const t = useTranslations('common');
+  const pathname = usePathname();
+
+  if (getWorkspaceDestination(pathname)?.href === '/settings') {
+    return <SettingsSidebar />;
+  }
 
   return (
     <Sidebar
@@ -139,34 +145,47 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
   const isDark = mounted && resolvedTheme === 'dark';
   const destination = getWorkspaceDestination(pathname);
   const settingsHref = useSettingsHref();
+  const isSettings = destination?.href === '/settings';
 
   return (
     <div className="flex min-h-svh min-w-0 flex-1 flex-col bg-background">
       <header className="sticky top-0 z-20 flex h-16 items-center border-b border-border/80 bg-background/90 px-3 backdrop-blur-xl sm:px-5">
-        <SidebarTrigger
-          aria-label={t('openMenu')}
-          className="mr-2 size-9 rounded-xl text-muted-foreground hover:bg-surface hover:text-foreground"
-        />
+        {!isSettings && (
+          <SidebarTrigger
+            aria-label={t('openMenu')}
+            className="mr-2 size-9 rounded-xl text-muted-foreground hover:bg-surface hover:text-foreground"
+          />
+        )}
 
         <Breadcrumb aria-label={t('breadcrumb')} className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap overflow-hidden text-sm">
-            {destination?.href === '/settings' ? (
+            {isSettings ? (
               <>
                 <BreadcrumbItem>
-                  <BreadcrumbLink render={<Link href={settingsHref} />}>
-                    {t('settings')}
-                  </BreadcrumbLink>
+                  {pathname === '/settings' ? (
+                    <BreadcrumbPage className="font-semibold text-foreground">
+                      {t('settings')}
+                    </BreadcrumbPage>
+                  ) : (
+                    <BreadcrumbLink render={<Link href={settingsHref} />}>
+                      {t('settings')}
+                    </BreadcrumbLink>
+                  )}
                 </BreadcrumbItem>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbPage className="font-semibold text-foreground">
-                    {t(
-                      pathname.startsWith('/settings/connections')
-                        ? 'connections'
-                        : 'codeReviewBot',
-                    )}
-                  </BreadcrumbPage>
-                </BreadcrumbItem>
+                {pathname !== '/settings' && (
+                  <>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage className="font-semibold text-foreground">
+                        {t(
+                          pathname.startsWith('/settings/connections')
+                            ? 'connections'
+                            : 'codeReviewBot',
+                        )}
+                      </BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </>
+                )}
               </>
             ) : destination && destination.href !== '/reviews' ? (
               <BreadcrumbItem>

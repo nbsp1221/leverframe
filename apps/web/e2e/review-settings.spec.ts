@@ -11,7 +11,7 @@ const original = { model: 'gpt-6-astra', reasoningEffort: 'high' };
 test('saves a model and reasoning pair through the real API, reloads it, and discards an unsaved edit', async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   await request.put('/api/v1/settings/reviews', { data: original });
   try {
     await page.goto('/en/reviews?fixture=default');
@@ -51,6 +51,9 @@ test('saves a model and reasoning pair through the real API, reloads it, and dis
     await expect(
       page.getByLabel('Reasoning effort', { exact: true }).locator('[data-slot="select-value"]'),
     ).toHaveText('Extra high');
+    if (testInfo.project.name === 'mobile') {
+      await page.getByRole('link', { name: 'Back to settings', exact: true }).click();
+    }
     await page.getByRole('link', { name: 'Back to work', exact: true }).click();
     await expect(page).toHaveURL(/\/en\/reviews\?fixture=default/);
   } finally {
@@ -108,7 +111,7 @@ test('does not invent settings when loading fails and recovers on retry', async 
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 });
 
-test('protects an unsaved draft during settings navigation', async ({ page }) => {
+test('protects an unsaved draft during settings navigation', async ({ page }, testInfo) => {
   await page.route('**/api/v1/settings/reviews', (route) =>
     route.fulfill({ json: { current: original, models: reviewModels } }),
   );
@@ -116,19 +119,25 @@ test('protects an unsaved draft during settings navigation', async ({ page }) =>
   await page.getByLabel('Model', { exact: true }).click();
   await page.getByRole('option', { name: 'GPT-6.1 Sol', exact: true }).click();
   page.once('dialog', (dialog) => dialog.dismiss());
-  await page
-    .getByRole('navigation', { name: 'Settings', exact: true })
-    .getByRole('link', { name: 'Connected computers', exact: true })
-    .click();
+  const leave =
+    testInfo.project.name === 'mobile'
+      ? page.getByRole('link', { name: 'Back to settings', exact: true })
+      : page
+          .getByRole('navigation', { name: 'Settings', exact: true })
+          .getByRole('link', { name: 'Connected computers', exact: true });
+  await leave.click();
   await expect(page).toHaveURL(/\/en\/settings\/reviews/);
   await expect(
     page.getByLabel('Model', { exact: true }).locator('[data-slot="select-value"]'),
   ).toHaveText('GPT-6.1 Sol');
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: 'Settings', exact: true })
-    .getByRole('link', { name: 'Connected computers', exact: true })
-    .click();
+  await leave.click();
+  if (testInfo.project.name === 'mobile') {
+    await page
+      .getByRole('navigation', { name: 'Settings categories', exact: true })
+      .getByRole('link', { name: /^Connected computers/ })
+      .click();
+  }
   await expect(
     page.getByRole('heading', { name: 'Connected computers', exact: true }),
   ).toBeVisible();
@@ -138,7 +147,7 @@ for (const locale of ['en', 'ko']) {
   for (const theme of ['light', 'dark']) {
     test(`${locale} ${theme}: settings share navigation, fit the viewport, and are accessible`, async ({
       page,
-    }) => {
+    }, testInfo) => {
       await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
       await page.route('**/api/v1/settings/reviews', (route) =>
         route.fulfill({ json: { current: original, models: reviewModels } }),
@@ -148,16 +157,26 @@ for (const locale of ['en', 'ko']) {
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(
         locale === 'ko' ? '코드 리뷰 봇' : 'Code review bot',
       );
-      const settings = page.getByRole('navigation', {
-        name: locale === 'ko' ? '설정' : 'Settings',
-        exact: true,
-      });
-      await expect(
-        settings.getByRole('link', {
-          name: locale === 'ko' ? '코드 리뷰 봇' : 'Code Review Bot',
+      if (testInfo.project.name === 'desktop') {
+        const settings = page.getByRole('navigation', {
+          name: locale === 'ko' ? '설정' : 'Settings',
           exact: true,
-        }),
-      ).toHaveAttribute('aria-current', 'page');
+        });
+        await expect(
+          settings.getByRole('link', {
+            name: locale === 'ko' ? '코드 리뷰 봇' : 'Code Review Bot',
+            exact: true,
+          }),
+        ).toHaveAttribute('aria-current', 'page');
+      } else {
+        await expect(page.locator('aside')).toBeHidden();
+        await expect(
+          page.getByRole('link', {
+            name: locale === 'ko' ? '설정으로 돌아가기' : 'Back to settings',
+            exact: true,
+          }),
+        ).toBeVisible();
+      }
       await expect(
         page
           .getByLabel(locale === 'ko' ? '모델' : 'Model', { exact: true })
@@ -166,6 +185,21 @@ for (const locale of ['en', 'ko']) {
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
       ).toBe(false);
+      expect(
+        (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+      ).toEqual([]);
+      await page
+        .getByRole('navigation', { name: locale === 'ko' ? '이동 경로' : 'Breadcrumb' })
+        .getByRole('link', { name: locale === 'ko' ? '설정' : 'Settings', exact: true })
+        .click();
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+        locale === 'ko' ? '설정' : 'Settings',
+      );
+      await expect(
+        page
+          .getByRole('navigation', { name: locale === 'ko' ? '설정 항목' : 'Settings categories' })
+          .getByRole('link'),
+      ).toHaveCount(2);
       expect(
         (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
       ).toEqual([]);

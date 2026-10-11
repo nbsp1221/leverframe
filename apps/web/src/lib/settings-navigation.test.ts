@@ -10,6 +10,12 @@ describe('settings return navigation', () => {
       expect(url.searchParams.get('returnTo')).toBe(origin);
     }
   });
+  it('preserves work context through the settings category index', () => {
+    const origin = '/development/12?view=events';
+    const url = new URL(settingsHref(undefined, origin), 'https://leverframe.invalid');
+    expect(url.pathname).toBe('/settings');
+    expect(url.searchParams.get('returnTo')).toBe(origin);
+  });
   it('preserves the selected request and filters through a settings URL', () => {
     const origin = '/decisions?request=dr-1&view=progress&q=some%20work';
     const url = new URL(connectionSettingsHref(origin), 'https://leverframe.invalid');

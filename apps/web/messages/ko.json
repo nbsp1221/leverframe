@@ -36,7 +36,12 @@
     "decisions": "요청함",
     "connections": "연결된 컴퓨터",
     "settings": "설정",
-    "backToWork": "작업으로 돌아가기"
+    "backToWork": "작업으로 돌아가기",
+    "backToSettings": "설정으로 돌아가기",
+    "settingsDescription": "관리할 설정을 선택하세요.",
+    "settingsCategories": "설정 항목",
+    "reviewDescription": "자동 리뷰에 사용할 모델과 추론 강도를 설정해요.",
+    "connectionsDescription": "Codex 질문과 답변을 주고받을 컴퓨터를 관리해요."
   },
   "development": {
     "title": "에이전트 개발",

@@ -8,7 +8,7 @@ import { useSearchParams } from 'next/navigation';
 import { Link, usePathname } from '../i18n/navigation';
 import { settingsHref, settingsReturnPath } from '../lib/settings-navigation';
 
-export function useSettingsHref(section: 'reviews' | 'connections' = 'reviews') {
+export function useSettingsHref(section?: 'reviews' | 'connections') {
   const pathname = usePathname();
   const params = useSearchParams();
   const search = params.toString();
@@ -43,6 +43,17 @@ export function SettingsReturnLink() {
     <Link href={href} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
       <ArrowLeftIcon data-icon="inline-start" />
       {t('backToWork')}
+    </Link>
+  );
+}
+
+export function SettingsIndexLink() {
+  const t = useTranslations('common');
+  const href = useSettingsHref();
+  return (
+    <Link href={href} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
+      <ArrowLeftIcon data-icon="inline-start" />
+      {t('backToSettings')}
     </Link>
   );
 }

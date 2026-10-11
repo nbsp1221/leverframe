@@ -36,7 +36,12 @@
     "decisions": "Requests",
     "connections": "Connected computers",
     "settings": "Settings",
-    "backToWork": "Back to work"
+    "backToWork": "Back to work",
+    "backToSettings": "Back to settings",
+    "settingsDescription": "Choose the settings you want to manage.",
+    "settingsCategories": "Settings categories",
+    "reviewDescription": "Choose the model and reasoning effort for automatic reviews.",
+    "connectionsDescription": "Manage the computers that send Codex questions and receive your responses."
   },
   "development": {
     "title": "Agent development",
