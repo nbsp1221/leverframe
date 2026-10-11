@@ -1,5 +1,6 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ReviewModelSettings } from '@repo/contracts/review-settings';
 import type { ExecutionTraceStore } from '../execution/trace.js';
 import { CodexExecutionRecorder } from '../execution/codex-events.js';
 import { reviewProtocol, reviewerSandboxName } from '../identity.js';
@@ -37,6 +38,7 @@ export class SandboxReviewer {
   ) {}
 
   async review(input: {
+    modelSettings?: ReviewModelSettings;
     baseRef: string;
     baseSha: string;
     cloneUrl: string;
@@ -60,6 +62,7 @@ export class SandboxReviewer {
       schema: string;
     }) => void;
   }): Promise<SandboxReview> {
+    const { model, reasoningEffort } = input.modelSettings ?? this.options;
     const sandboxName = reviewerSandboxName(input.jobId);
     const sandboxOutputPath = reviewProtocol.sandboxOutputPath;
     const sandboxAnchor = join(input.jobDirectory, 'sandbox-anchor');
@@ -190,8 +193,8 @@ export class SandboxReviewer {
           : `\n\nRepository review policy (from the default branch):\n${input.policyInstructions.map((instruction) => `- ${instruction}`).join('\n')}`;
       const prompt = `${promptTemplate}\n\nPull request context:\n- Repository: ${input.repository}\n- Pull request: #${input.pullRequestNumber}\n- Title: ${input.title}\n- Review mode: ${reviewMode}\n- Base ref: ${input.baseRef}\n- Base SHA: ${input.baseSha}\n- Review base SHA: ${reviewBaseSha}\n- Head SHA: ${input.headSha}\n\n${boundaryInstruction}${policyContext}${previousContext}`;
       input.onPromptPrepared?.({
-        model: this.options.model,
-        reasoning: this.options.reasoningEffort,
+        model,
+        reasoning: reasoningEffort,
         prompt,
         schema: readFileSync(join(this.options.resourcesDirectory, 'review-schema.json'), 'utf8'),
       });
@@ -209,9 +212,9 @@ export class SandboxReviewer {
             'codex',
             'exec',
             '--model',
-            this.options.model,
+            model,
             '--config',
-            `model_reasoning_effort="${this.options.reasoningEffort}"`,
+            `model_reasoning_effort="${reasoningEffort}"`,
             '--dangerously-bypass-approvals-and-sandbox',
             '--ephemeral',
             '--ignore-rules',

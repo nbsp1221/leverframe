@@ -9,7 +9,7 @@ import {
 import { BotIcon, GitPullRequestIcon, InboxIcon, SettingsIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Link, usePathname } from '../i18n/navigation';
-import { useConnectionSettingsHref } from './connection-settings-link';
+import { useSettingsHref } from './connection-settings-link';
 
 const destinations = [
   { href: '/decisions', label: 'decisions', icon: InboxIcon, section: 'primary' },
@@ -25,7 +25,7 @@ export function getWorkspaceDestination(pathname: string) {
 export function WorkspaceNavigation({ section }: { section: 'primary' | 'utility' }) {
   const t = useTranslations('common');
   const active = getWorkspaceDestination(usePathname());
-  const settingsHref = useConnectionSettingsHref();
+  const settingsHref = useSettingsHref();
   const { setOpenMobile } = useSidebar();
 
   return (

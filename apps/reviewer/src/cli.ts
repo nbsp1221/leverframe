@@ -114,6 +114,11 @@ function serve(): void {
           projections: database.developmentProjections,
         });
   const worker = new ReviewWorker({
+    getModelSettings: () =>
+      database.reviewSettings.get({
+        model: config.model,
+        reasoningEffort: config.reasoningEffort,
+      }),
     allowedOwnerId: config.allowedOwnerId,
     credentials,
     database,

@@ -18,12 +18,13 @@ test('settings is separate from work navigation and old links reach the same pag
   page,
 }, testInfo) => {
   await page.route('**/api/v1/connectors', (route) => route.fulfill({ json: { items: [] } }));
-  for (const path of ['/en/connections', '/en/settings']) {
+  for (const [path, section, heading] of [
+    ['/en/connections', 'connections', 'Connected computers'],
+    ['/en/settings', 'reviews', 'Code review bot'],
+  ] as const) {
     await page.goto(path);
-    await expect(page).toHaveURL(/\/en\/settings\/connections/);
-    await expect(
-      page.getByRole('heading', { name: 'Connected computers', exact: true }),
-    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/en/settings/${section}`));
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
   }
   if (testInfo.project.name === 'mobile') {
     await page.getByRole('button', { name: 'Open navigation' }).click();
@@ -121,10 +122,8 @@ test('settings round trip preserves a selected request, filters, and unsent answ
     .locator('[data-sidebar="footer"]:visible')
     .getByRole('link', { name: 'Settings', exact: true })
     .click();
-  await expect(page).toHaveURL(/settings\/connections/);
-  await expect(
-    page.getByRole('heading', { name: 'Connected computers', exact: true }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/settings\/reviews/);
+  await expect(page.getByRole('heading', { name: 'Code review bot', exact: true })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.reload();
   await page.getByRole('link', { name: 'Back to work', exact: true }).click();

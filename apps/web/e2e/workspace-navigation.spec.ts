@@ -32,6 +32,7 @@ for (const locale of ['en', 'ko']) {
         'decisions',
         'reviews?fixture=default',
         'development',
+        'settings/reviews',
         'settings/connections',
         'reviews/241?fixture=completed-multiple-findings',
       ]) {
@@ -46,7 +47,7 @@ for (const locale of ['en', 'ko']) {
         const current = page.locator('[data-sidebar="menu-button"][aria-current="page"]:visible');
         await expect(current).toHaveCount(1);
         const expectedPath = path.startsWith('settings/')
-          ? `/${locale}/settings/connections`
+          ? `/${locale}/settings/reviews`
           : `/${locale}/${path.split(/[/?]/)[0]}`;
         expect(new URL((await current.getAttribute('href'))!, page.url()).pathname).toBe(
           expectedPath,

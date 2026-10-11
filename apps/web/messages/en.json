@@ -351,7 +351,8 @@
     "reviewColumn": "Review",
     "issues": "Issues",
     "needsReview": "Needs evaluation",
-    "retry": "Retry"
+    "retry": "Retry",
+    "settings": "Review settings"
   },
   "reviewDetail": {
     "backToList": "Back to reviews",
@@ -804,5 +805,38 @@
     "connectionCheckFailed": "Connection status is unavailable",
     "connectionCheckHelp": "The computer list could not be loaded. This does not mean your connections were removed. You can try again shortly.",
     "openSettings": "Open connection settings"
+  },
+  "reviewSettings": {
+    "title": "Code review bot",
+    "description": "Choose the model and reasoning effort for automatic code reviews.",
+    "modelSection": "Review model",
+    "scope": "Applies to automatic code reviews across all repositories. Connected computer conversations and agent development settings stay unchanged.",
+    "current": "Currently applied",
+    "model": "Model",
+    "reasoning": "Reasoning effort",
+    "modelHelp": "Model access and usage depend on the review bot’s Codex account.",
+    "unsupportedCurrent": "Your current configuration is preserved. To change it, choose a supported model from the list.",
+    "reasoningHelp": "Higher effort can increase processing time and usage.",
+    "chooseEffort": "Choose a reasoning effort for this model.",
+    "application": "Applies to reviews that start after saving, including queued reviews. Already running reviews finish with their original settings.",
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Discard changes",
+    "saved": "Saved. Applies to the next review.",
+    "unsaved": "You have unsaved changes.",
+    "upToDate": "Using your saved settings.",
+    "unsavedPrompt": "You have unsaved model settings. Discard changes and leave?",
+    "loadError": "Review settings are unavailable",
+    "loadErrorHelp": "Editing is paused until the current settings can be loaded. Please try again.",
+    "saveError": "Settings could not be saved",
+    "saveErrorHelp": "Your changes are preserved. Retry saving without replacing the currently applied settings.",
+    "retry": "Try again",
+    "loading": "Loading review settings",
+    "effort_low": "Low",
+    "effort_medium": "Medium",
+    "effort_high": "High",
+    "effort_xhigh": "Extra high",
+    "effort_max": "Max",
+    "effort_ultra": "Ultra"
   }
 }

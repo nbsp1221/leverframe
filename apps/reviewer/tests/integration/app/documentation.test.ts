@@ -117,6 +117,8 @@ describe('agent-readable API documentation', () => {
         'getFindingContext',
         'getReviewExecution',
         'streamReviewExecution',
+        'getReviewModelSettings',
+        'setReviewModelSettings',
         'listDevelopmentRepositories',
         'listDevelopmentTickets',
         'importDevelopmentTicket',
@@ -131,10 +133,12 @@ describe('agent-readable API documentation', () => {
         'cleanupDevelopmentRun',
       ]),
     );
-    expect(operationIds).toHaveLength(31);
+    expect(operationIds).toHaveLength(33);
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     const expectedOperations = [
+      ['get', '/api/v1/settings/reviews', 'getReviewModelSettings', ['200']],
+      ['put', '/api/v1/settings/reviews', 'setReviewModelSettings', ['200', '403', '422']],
       [
         'post',
         '/api/v1/decisions/{id}/discard',

@@ -604,6 +604,19 @@ export const migrations: readonly Migration[] = [
         .run(now, now);
     },
   },
+  {
+    version: 9,
+    name: 'review-model-settings',
+    apply: (database) => {
+      database.exec(`
+        CREATE TABLE review_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          model TEXT NOT NULL,
+          reasoning_effort TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(database: DatabaseSync): number {

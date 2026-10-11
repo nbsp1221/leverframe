@@ -108,6 +108,12 @@ Runtime state stays with the checkout in `.leverframe/`; no root-owned directory
 
 This MVP intentionally has no application-level authentication. Keep the UI, API, and setup flow behind an operator-controlled private network such as Tailscale; anyone who can reach them can read review artifacts and change evaluations. The public GitHub host must expose only the exact webhook endpoint. It must not expose the UI, API, or setup routes.
 
+## Code review model settings
+
+Open **Settings → Code review bot**, or use **Review settings** from the review list, to save the model and reasoning effort for automatic reviews across all repositories. The change applies when a review execution starts, including queued work; already running reviews keep their original settings. Connected computer conversations and agent development settings are unaffected.
+
+The private `GET /api/v1/settings/reviews` endpoint returns the effective pair and supported runner model catalog; `PUT` validates and saves both fields together in SQLite. Saved values survive restarts and take precedence over `REVIEW_MODEL` and `REVIEW_REASONING_EFFORT`, which remain startup defaults when nothing has been saved. The catalog describes supported runner configurations, not verified account access or guaranteed review quality. These operator endpoints share the private network boundary of the observation API and must not be exposed publicly.
+
 ## Review API
 
 The web UI and external tools use the same versioned review API and evaluation revisions. Leverframe does not provide a separate agent API or run an approval workflow. An external agent can inspect a completed review, propose judgments to a human, and use the documented evaluation endpoints after the human approves the result.

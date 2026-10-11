@@ -75,11 +75,11 @@ const server = createLeverframeServer(
     host: '127.0.0.1',
     jobsDirectory: join(dataRoot, 'jobs'),
     githubAppName: 'e2e',
-    model: 'e2e-model',
+    model: 'gpt-6-astra',
     port,
     uiBaseUrl: `http://127.0.0.1:${port}`,
     webhookUrl: `http://127.0.0.1:${port}/webhooks/github`,
-    reasoningEffort: 'low',
+    reasoningEffort: 'high',
     resourcesDirectory: fileURLToPath(new URL('../../resources', import.meta.url)),
     sandboxTemplate: `leverframe-review-sandbox:sha256-${'a'.repeat(64)}`,
     development: {

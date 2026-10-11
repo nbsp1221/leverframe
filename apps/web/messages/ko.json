@@ -351,7 +351,8 @@
     "reviewColumn": "리뷰",
     "issues": "문제",
     "needsReview": "평가 필요",
-    "retry": "다시 시도"
+    "retry": "다시 시도",
+    "settings": "리뷰 설정"
   },
   "reviewDetail": {
     "backToList": "리뷰 목록으로 돌아가기",
@@ -804,5 +805,38 @@
     "connectionCheckFailed": "연결 상태를 확인할 수 없어요",
     "connectionCheckHelp": "연결 목록을 불러오지 못했어요. 기존 연결이 해제된 것은 아니며, 잠시 후 다시 확인할 수 있어요.",
     "openSettings": "연결 설정 열기"
+  },
+  "reviewSettings": {
+    "title": "코드 리뷰 봇",
+    "description": "자동 코드 리뷰에 사용할 모델과 추론 강도를 설정해요.",
+    "modelSection": "리뷰 모델",
+    "scope": "모든 저장소의 자동 코드 리뷰에 적용돼요. 연결된 컴퓨터의 대화와 에이전트 개발 설정은 바뀌지 않아요.",
+    "current": "현재 적용 중",
+    "model": "모델",
+    "reasoning": "추론 강도",
+    "modelHelp": "모델 사용 가능 여부와 사용량은 리뷰 봇의 Codex 계정에 따라 달라요.",
+    "unsupportedCurrent": "현재 설정은 유지되고 있어요. 변경하려면 목록에서 지원 모델을 선택하세요.",
+    "reasoningHelp": "높일수록 처리 시간과 사용량이 늘어날 수 있어요.",
+    "chooseEffort": "이 모델에 사용할 추론 강도를 선택하세요.",
+    "application": "저장 후 새로 시작하는 리뷰부터 적용돼요. 대기 중인 리뷰도 포함하며, 실행 중인 리뷰는 기존 설정으로 마무리해요.",
+    "save": "저장",
+    "saving": "저장 중…",
+    "cancel": "변경 취소",
+    "saved": "저장했어요. 다음 리뷰부터 적용돼요.",
+    "unsaved": "아직 저장하지 않은 변경이 있어요.",
+    "upToDate": "저장된 설정을 사용하고 있어요.",
+    "unsavedPrompt": "저장하지 않은 모델 설정이 있어요. 변경을 버리고 이동할까요?",
+    "loadError": "리뷰 설정을 불러오지 못했어요",
+    "loadErrorHelp": "설정을 확인할 수 없어 편집을 잠시 멈췄어요. 다시 시도해 주세요.",
+    "saveError": "설정을 저장하지 못했어요",
+    "saveErrorHelp": "입력한 변경은 유지돼요. 현재 적용 중인 설정을 바꾸지 않고 다시 저장을 시도할 수 있어요.",
+    "retry": "다시 시도",
+    "loading": "리뷰 설정 불러오는 중",
+    "effort_low": "낮음 · Low",
+    "effort_medium": "중간 · Medium",
+    "effort_high": "높음 · High",
+    "effort_xhigh": "매우 높음 · Extra high",
+    "effort_max": "최대 · Max",
+    "effort_ultra": "Ultra"
   }
 }

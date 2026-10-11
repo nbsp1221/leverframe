@@ -1,5 +1,5 @@
 import { redirect } from '../../../src/i18n/navigation';
-import { connectionSettingsHref } from '../../../src/lib/settings-navigation';
+import { settingsHref } from '../../../src/lib/settings-navigation';
 
 export default async function SettingsRedirect({
   params,
@@ -11,7 +11,7 @@ export default async function SettingsRedirect({
   const { locale } = await params;
   const { returnTo } = await searchParams;
   redirect({
-    href: connectionSettingsHref(typeof returnTo === 'string' ? returnTo : '/decisions'),
+    href: settingsHref('reviews', typeof returnTo === 'string' ? returnTo : '/decisions'),
     locale,
   });
 }

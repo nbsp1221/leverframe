@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { connectionSettingsHref, settingsReturnPath } from './settings-navigation';
+import { connectionSettingsHref, settingsHref, settingsReturnPath } from './settings-navigation';
 
 describe('settings return navigation', () => {
+  it('keeps review and connection settings distinct while preserving the same work destination', () => {
+    const origin = '/reviews?evaluation=needs_evaluation';
+    for (const section of ['reviews', 'connections'] as const) {
+      const url = new URL(settingsHref(section, origin), 'https://leverframe.invalid');
+      expect(url.pathname).toBe(`/settings/${section}`);
+      expect(url.searchParams.get('returnTo')).toBe(origin);
+    }
+  });
   it('preserves the selected request and filters through a settings URL', () => {
     const origin = '/decisions?request=dr-1&view=progress&q=some%20work';
     const url = new URL(connectionSettingsHref(origin), 'https://leverframe.invalid');

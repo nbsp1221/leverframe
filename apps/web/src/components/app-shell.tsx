@@ -36,7 +36,7 @@ import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { type CSSProperties, useEffect, useState } from 'react';
 import { Link, usePathname, useRouter } from '../i18n/navigation';
 import { confirmDirtyNavigation } from '../lib/dirty-navigation';
-import { useConnectionSettingsHref } from './connection-settings-link';
+import { useSettingsHref } from './connection-settings-link';
 import { WorkspaceNavigation, getWorkspaceDestination } from './workspace-navigation';
 
 const shellSize = {
@@ -138,7 +138,7 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
 
   const isDark = mounted && resolvedTheme === 'dark';
   const destination = getWorkspaceDestination(pathname);
-  const settingsHref = useConnectionSettingsHref();
+  const settingsHref = useSettingsHref();
 
   return (
     <div className="flex min-h-svh min-w-0 flex-1 flex-col bg-background">
@@ -160,7 +160,11 @@ function SidebarMain({ children }: Readonly<{ children: React.ReactNode }>) {
                 <BreadcrumbSeparator />
                 <BreadcrumbItem>
                   <BreadcrumbPage className="font-semibold text-foreground">
-                    {t('connections')}
+                    {t(
+                      pathname.startsWith('/settings/connections')
+                        ? 'connections'
+                        : 'codeReviewBot',
+                    )}
                   </BreadcrumbPage>
                 </BreadcrumbItem>
               </>

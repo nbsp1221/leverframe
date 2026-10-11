@@ -30,7 +30,7 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
   }
   const incoming = new URL(request.url);
   if (
-    path[0] === 'connectors' &&
+    (path[0] === 'connectors' || path[0] === 'settings') &&
     !['GET', 'HEAD'].includes(request.method) &&
     path[1] !== 'agent' &&
     path[1] !== 'enroll'

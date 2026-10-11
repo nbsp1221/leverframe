@@ -18,6 +18,7 @@ import { registerDecisionRoutes } from './routes/decisions.js';
 import { registerDevelopmentRoutes } from './routes/development.js';
 import { registerGitHubRoutes } from './routes/github.js';
 import { registerReviewExecutionRoutes } from './routes/review-execution.js';
+import { registerReviewSettingsRoutes } from './routes/review-settings.js';
 import { registerReviewRoutes } from './routes/reviews.js';
 import {
   type Dependency,
@@ -106,6 +107,10 @@ function createApi(
   registerDecisionRoutes(app, hooks.decisions, hooks.decisionRegistration);
   registerConnectorRoutes(app, hooks.connectors, hooks.decisions, hooks.decisionRegistration);
   registerReviewRoutes(app, database, hooks, observations, recordRead);
+  registerReviewSettingsRoutes(app, database.reviewSettings, {
+    model: config.model,
+    reasoningEffort: config.reasoningEffort,
+  });
   registerReviewExecutionRoutes(app, database, traceStore, recordRead);
 
   const openApiDocument = app.getOpenAPI31Document({

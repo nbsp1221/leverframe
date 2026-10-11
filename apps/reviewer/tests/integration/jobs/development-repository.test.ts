@@ -25,7 +25,7 @@ function setup() {
 }
 
 describe('DevelopmentRepository', () => {
-  it('migrates to schema 8 and creates web-native work without an external provider', () => {
+  it('migrates to the current schema and creates web-native work without an external provider', () => {
     const { database, repository } = setup();
     const run = repository.createRun({
       goal: 'Build a Leverframe-owned development loop.',
@@ -34,7 +34,7 @@ describe('DevelopmentRepository', () => {
       now,
     });
 
-    expect(schemaVersion(database)).toBe(8);
+    expect(schemaVersion(database)).toBe(migrations.at(-1)!.version);
     expect(run).toMatchObject({
       generation: 1,
       goal: 'Build a Leverframe-owned development loop.',

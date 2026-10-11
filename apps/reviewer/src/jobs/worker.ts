@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ReviewModelSettings } from '@repo/contracts/review-settings';
 import type { CredentialStore } from '../github/credentials.js';
 import type { ReviewableLines } from '../review/diff-lines.js';
 import type { SandboxReviewer } from '../sandbox/reviewer.js';
@@ -51,6 +52,7 @@ export class ReviewWorker {
       credentials: CredentialStore;
       database: JobDatabase;
       jobsDirectory: string;
+      getModelSettings?: () => ReviewModelSettings;
       onReviewCompleted?: (input: {
         accepted: boolean;
         findings: ReturnType<JobDatabase['getReviewFindings']>;
@@ -200,6 +202,8 @@ export class ReviewWorker {
     let statusCommentId: number | undefined;
     let statusCommentActivated = false;
     try {
+      // Capture before any asynchronous preparation so a save cannot change an active run.
+      const modelSettings = this.options.getModelSettings?.();
       if (!this.options.credentials.exists()) {
         throw new Error('GitHub App credentials are not configured');
       }
@@ -308,6 +312,7 @@ export class ReviewWorker {
       }
       phase = 'REVIEWING';
       const review = await this.options.reviewer.review({
+        ...(modelSettings === undefined ? {} : { modelSettings }),
         attempt: job.attempt ?? 0,
         baseRef: pullRequest.baseRef,
         baseSha: pullRequest.baseSha,
