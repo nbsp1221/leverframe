@@ -174,7 +174,7 @@ describe('Check Run start recovery', () => {
     });
   });
 
-  it('repeats the same status update after a lost response without starting another retry budget', async () => {
+  it('shares one retry budget between network errors and 404s with the same payload', async () => {
     let startRequests = 0;
     githubMocks.installationRequest.mockImplementation(() => {
       startRequests += 1;

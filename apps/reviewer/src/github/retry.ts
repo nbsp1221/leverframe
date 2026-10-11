@@ -40,10 +40,22 @@ export function githubRetryDelayMilliseconds(error: unknown, attempt: number): n
     );
   }
 
-  const code = typeof record?.code === 'string' ? record.code : undefined;
-  return code !== undefined && ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT'].includes(code)
-    ? 500 * 2 ** attempt
-    : undefined;
+  if (response !== undefined || (status !== undefined && status !== 500)) {
+    return undefined;
+  }
+  // Octokit wraps fetch failures, which can wrap the native network error again.
+  // Bound traversal because error causes can cycle.
+  let cause = record;
+  for (let depth = 0; cause !== undefined && depth < 5; depth += 1) {
+    if (
+      typeof cause.code === 'string' &&
+      ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT'].includes(cause.code)
+    ) {
+      return 500 * 2 ** attempt;
+    }
+    cause = asRecord(cause.cause);
+  }
+  return undefined;
 }
 
 export async function withGitHubRetry<T>(
