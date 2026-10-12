@@ -189,7 +189,10 @@ export function DecisionDetail({
               {item.waitingFor}
             </p>
           </section>
-          {!deferred && <DecisionAnswerForm key={item.id} item={item} onChange={onChange} />}
+          {/* Polling can show the new revision before the mutation rebases the cached draft. */}
+          {!deferred && !busy && (
+            <DecisionAnswerForm key={item.id} item={item} onChange={onChange} />
+          )}
         </>
       )}
 
