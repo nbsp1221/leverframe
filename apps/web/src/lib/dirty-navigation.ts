@@ -1,6 +1,6 @@
 'use client';
 
-const prompts = new Map<symbol, string>();
+const prompts = new Map<symbol, { message: string; onDiscard: (() => void) | undefined }>();
 let installed = false;
 
 function onAnchorClick(event: MouseEvent) {
@@ -18,9 +18,9 @@ function onAnchorClick(event: MouseEvent) {
   }
 }
 
-export function registerDirtyNavigation(prompt: string) {
+export function registerDirtyNavigation(prompt: string, onDiscard?: () => void) {
   const token = Symbol('dirty-navigation');
-  prompts.set(token, prompt);
+  prompts.set(token, { message: prompt, onDiscard });
   if (!installed) {
     window.addEventListener('click', onAnchorClick, true);
     installed = true;
@@ -36,5 +36,14 @@ export function registerDirtyNavigation(prompt: string) {
 
 export function confirmDirtyNavigation(): boolean {
   const prompt = prompts.values().next().value;
-  return prompt === undefined || window.confirm(prompt);
+  if (prompt === undefined) {
+    return true;
+  }
+  if (!window.confirm(prompt.message)) {
+    return false;
+  }
+  for (const entry of prompts.values()) {
+    entry.onDiscard?.();
+  }
+  return true;
 }

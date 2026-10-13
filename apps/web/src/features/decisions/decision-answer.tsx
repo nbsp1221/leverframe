@@ -60,13 +60,16 @@ function readDraft(item: Decision): Draft {
 export function DecisionAnswerForm({
   item,
   onChange,
+  disabled = false,
 }: {
   item: Decision;
   onChange: () => Promise<void>;
+  disabled?: boolean;
 }) {
   const t = useTranslations('decisions');
   const [draft, setDraft] = useState(() => readDraft(item));
-  const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const busy = submitting || disabled;
   const [error, setError] = useState<string | null>(null);
   const stale = draft.expectedRevision !== item.revision;
   const canSubmit =
@@ -87,7 +90,7 @@ export function DecisionAnswerForm({
     if (busy || !canSubmit || stale) {
       return;
     }
-    setBusy(true);
+    setSubmitting(true);
     setError(null);
     try {
       await answerDecision(item.id, draft);
@@ -103,7 +106,7 @@ export function DecisionAnswerForm({
       );
       await onChange();
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   }
 
@@ -214,7 +217,11 @@ export function DecisionAnswerForm({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">{t('draftHelp')}</p>
         <Button type="submit" disabled={busy || !canSubmit || stale}>
-          {busy ? t('sending') : draft.intent === 'research' ? t('sendResearch') : t('sendAnswer')}
+          {submitting
+            ? t('sending')
+            : draft.intent === 'research'
+              ? t('sendResearch')
+              : t('sendAnswer')}
           <ArrowUpRightIcon data-icon="inline-end" />
         </Button>
       </div>

@@ -39,7 +39,10 @@ afterEach(() => {
   }
 });
 
-async function startServer(hooks: Parameters<typeof createLeverframeServer>[3] = {}) {
+async function startServer(
+  hooks: Parameters<typeof createLeverframeServer>[3] = {},
+  surface: 'private' | 'webhook' = 'private',
+) {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), 'leverframe-test-'));
   const credentials = new CredentialStore(temporaryDirectory);
   credentials.write({
@@ -51,7 +54,7 @@ async function startServer(hooks: Parameters<typeof createLeverframeServer>[3] =
     webhookSecret: secret,
   });
   const database = new JobDatabase(':memory:');
-  const server = createLeverframeServer(config, database, credentials, hooks);
+  const server = createLeverframeServer(config, database, credentials, hooks, undefined, surface);
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve);
   });
@@ -101,6 +104,40 @@ function commandBody(): Buffer {
 }
 
 describe('Leverframe server', () => {
+  it('exposes only signed webhook delivery on the public listener without a reverse proxy', async () => {
+    const { url, database } = await startServer({}, 'webhook');
+    for (const path of [
+      '/api/v1/settings/reviews',
+      '/api/v1/status',
+      '/setup/github',
+      '/docs',
+      '/openapi.json',
+      '/healthz',
+      '/en/reviews',
+      '/webhooks/github',
+      '/webhooks/github?extra=1',
+      '/webhooks/github/',
+    ]) {
+      expect((await fetch(`${url}${path}`, { redirect: 'manual' })).status).toBe(404);
+      expect((await fetch(`${url}${path}`, { method: 'POST', body: '{}' })).status).toBe(
+        path === '/webhooks/github' ? 401 : 404,
+      );
+    }
+    const body = webhookBody();
+    const response = await fetch(`${url}/webhooks/github`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-github-delivery': 'public-listener-test',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': createWebhookSignature(body, secret),
+      },
+      body: body.toString('utf8'),
+    });
+    expect(response.status).toBe(202);
+    expect(database.countJobs()).toBe(1);
+  });
+
   it('reports health', async () => {
     const { url } = await startServer();
     const response = await fetch(`${url}/healthz`);

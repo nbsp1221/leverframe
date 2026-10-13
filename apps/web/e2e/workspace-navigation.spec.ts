@@ -21,6 +21,45 @@ async function menuGeometry(items: Locator) {
   );
 }
 
+for (const theme of ['light', 'dark']) {
+  test(`${theme}: settings categories retain the work menu's geometry and selection style`, async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile', 'Mobile settings use the category index.');
+    await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
+    await page.goto('/en/decisions');
+    const selected = page.locator('[data-sidebar="menu-button"][aria-current="page"]:visible');
+    const workGeometry = (await menuGeometry(selected))[0];
+    const workStyle = await selected.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, color: style.color };
+    });
+
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Settings categories' })
+      .getByRole('link', { name: /^Code Review Bot/ })
+      .click();
+    const categories = page.getByRole('navigation', { name: 'Settings', exact: true });
+    await expect(categories.getByRole('link')).toHaveCount(2);
+    await expect(page.getByRole('navigation', { name: 'Workspace' })).toHaveCount(0);
+    await expect(selected).toHaveCount(1);
+    await expect(selected).toHaveText('Code Review Bot');
+    await page.mouse.move(0, 0);
+    expect((await menuGeometry(selected))[0]).toEqual(workGeometry);
+    expect(
+      await selected.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { background: style.backgroundColor, color: style.color };
+      }),
+    ).toEqual(workStyle);
+
+    await categories.getByRole('link', { name: 'Connected computers' }).click();
+    await expect(selected).toHaveText('Connected computers');
+    expect((await menuGeometry(selected))[0]).toEqual(workGeometry);
+  });
+}
+
 for (const locale of ['en', 'ko']) {
   for (const theme of ['light', 'dark']) {
     test(`${locale} ${theme}: every destination shares menu geometry and selected appearance`, async ({
@@ -32,7 +71,6 @@ for (const locale of ['en', 'ko']) {
         'decisions',
         'reviews?fixture=default',
         'development',
-        'settings/connections',
         'reviews/241?fixture=completed-multiple-findings',
       ]) {
         await page.goto(`/${locale}/${path}`);
@@ -45,9 +83,7 @@ for (const locale of ['en', 'ko']) {
         // Both the accessible location and visual state must identify the same single link.
         const current = page.locator('[data-sidebar="menu-button"][aria-current="page"]:visible');
         await expect(current).toHaveCount(1);
-        const expectedPath = path.startsWith('settings/')
-          ? `/${locale}/settings/connections`
-          : `/${locale}/${path.split(/[/?]/)[0]}`;
+        const expectedPath = `/${locale}/${path.split(/[/?]/)[0]}`;
         expect(new URL((await current.getAttribute('href'))!, page.url()).pathname).toBe(
           expectedPath,
         );

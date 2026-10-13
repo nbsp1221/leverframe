@@ -100,7 +100,7 @@ describe('computer enrollment and durable routing', () => {
     const gateway = new SessionDecisionGateway(connections, repository, 'legacy');
     const service = new DecisionService(repository, gateway);
     const app = new OpenAPIHono();
-    registerConnectorRoutes(app, runtime, service, {
+    registerConnectorRoutes(app, 'http://localhost', runtime, service, {
       token: 'legacy',
       resolve: (session, id) => gateway.resolve(session, id),
     });

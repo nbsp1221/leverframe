@@ -4,6 +4,23 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig = {
   output: 'standalone' as const,
+  rewrites() {
+    const backend = process.env.REVIEWER_INTERNAL_URL?.replace(/\/+$/, '');
+    return backend
+      ? {
+          beforeFiles: [
+            '/healthz',
+            '/setup/github/:path*',
+            '/openapi.json',
+            '/docs/:path*',
+            '/llms.txt',
+          ].map((source) => ({
+            source,
+            destination: `${backend}${source}`,
+          })),
+        }
+      : [];
+  },
   devIndicators: { position: 'bottom-right' as const },
   distDir: process.env.LEVERFRAME_WEB_DIST_DIR ?? '.next',
   allowedDevOrigins: ['localhost', '127.0.0.1', '100.80.10.10'],

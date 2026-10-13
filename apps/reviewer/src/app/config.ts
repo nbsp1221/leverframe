@@ -65,6 +65,7 @@ const serverConfigSchema = z.object({
   port: z.number().int().min(1).max(65_535),
   uiBaseUrl: uiBaseUrlSchema,
   webhookUrl: webhookUrlSchema,
+  webhookPort: z.number().int().min(1).max(65_535).optional(),
   reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
   resourcesDirectory: z.string().min(1),
   sandboxTemplate: sandboxTemplateSchema,
@@ -127,6 +128,9 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     port,
     uiBaseUrl: environment.APP_UI_BASE_URL,
     webhookUrl: environment.GITHUB_WEBHOOK_URL,
+    ...(environment.GITHUB_WEBHOOK_PORT
+      ? { webhookPort: Number(environment.GITHUB_WEBHOOK_PORT) }
+      : {}),
     reasoningEffort: environment.REVIEW_REASONING_EFFORT ?? 'high',
     resourcesDirectory,
     sandboxTemplate: environment.REVIEW_SANDBOX_TEMPLATE,

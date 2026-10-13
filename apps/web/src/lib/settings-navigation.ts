@@ -16,5 +16,12 @@ export function settingsReturnPath(value: string | null | undefined): string {
 }
 
 export function connectionSettingsHref(returnTo: string): string {
-  return `/settings/connections?${new URLSearchParams({ returnTo: settingsReturnPath(returnTo) })}`;
+  return settingsHref('connections', returnTo);
+}
+
+export function settingsHref(
+  section: 'reviews' | 'connections' | undefined,
+  returnTo: string,
+): string {
+  return `/settings${section ? `/${section}` : ''}?${new URLSearchParams({ returnTo: settingsReturnPath(returnTo) })}`;
 }

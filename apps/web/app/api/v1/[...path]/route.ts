@@ -1,94 +1,52 @@
-import { env } from 'node:process';
+import { Buffer } from 'node:buffer';
 import { connectorMaximumResultBytes } from '@repo/contracts/connectors';
 
-const maximumRequestBytes = 1024 * 1024;
-const forwardedRequestHeaders = ['accept', 'content-type', 'last-event-id'] as const;
-const forwardedResponseHeaders = ['cache-control', 'content-type', 'x-accel-buffering'] as const;
-
-export const dynamic = 'force-dynamic';
-
 async function proxy(request: Request, context: { params: Promise<{ path: string[] }> }) {
-  const configured = env.REVIEWER_INTERNAL_URL;
-  if (!configured) {
+  const backend = process.env.REVIEWER_INTERNAL_URL;
+  if (!backend) {
     return Response.json({ error: 'Reviewer connection is not configured.' }, { status: 503 });
   }
-  let base: URL;
-  try {
-    base = new URL(`${configured.replace(/\/+$/, '')}/`);
-    if (!['http:', 'https:'].includes(base.protocol)) {
-      throw new Error('invalid reviewer protocol');
-    }
-  } catch {
-    return Response.json({ error: 'Reviewer connection is invalid.' }, { status: 503 });
-  }
   const { path } = await context.params;
-  if (
-    path.length === 0 ||
-    path.some((segment) => segment === '' || segment === '.' || segment === '..')
-  ) {
-    return Response.json({ error: 'Invalid API path.' }, { status: 400 });
-  }
-  const incoming = new URL(request.url);
-  if (
-    path[0] === 'connectors' &&
-    !['GET', 'HEAD'].includes(request.method) &&
-    path[1] !== 'agent' &&
-    path[1] !== 'enroll'
-  ) {
-    const origin = request.headers.get('origin');
-    if (
-      origin &&
-      origin !== `${incoming.protocol}//${request.headers.get('host') ?? incoming.host}`
-    ) {
-      return Response.json({ error: 'origin_rejected' }, { status: 403 });
-    }
-  }
-
-  const target = new URL(`api/v1/${path.map(encodeURIComponent).join('/')}`, base);
-  target.search = incoming.search;
+  const target = new URL(`/api/v1/${path.map(encodeURIComponent).join('/')}`, backend);
+  target.search = new URL(request.url).search;
   const headers = new Headers();
-  for (const name of forwardedRequestHeaders) {
+  for (const name of ['accept', 'content-type', 'last-event-id', 'authorization', 'origin']) {
     const value = request.headers.get(name);
     if (value !== null) {
       headers.set(name, value);
     }
   }
-  if (path[0] === 'connectors') {
-    const authorization = request.headers.get('authorization');
-    if (authorization) {
-      headers.set('authorization', authorization);
+  const limit =
+    path[0] === 'connectors' && path[1] === 'agent' && path[2] === 'results'
+      ? connectorMaximumResultBytes
+      : 1024 * 1024;
+  // Drain rejected uploads without retaining them, so 413 cannot reset an active upload.
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (reader) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    size += value.byteLength;
+    if (size <= limit) {
+      chunks.push(value);
+    } else {
+      chunks.length = 0;
     }
   }
-  let body: ArrayBuffer | undefined;
-  if (!['GET', 'HEAD'].includes(request.method)) {
-    body = await request.arrayBuffer();
-    const limit =
-      path[0] === 'connectors' && path[1] === 'agent' && path[2] === 'results'
-        ? connectorMaximumResultBytes
-        : maximumRequestBytes;
-    if (body.byteLength > limit) {
-      return Response.json({ error: 'Request body is too large.' }, { status: 413 });
-    }
+  if (size > limit) {
+    return Response.json({ error: 'Request body is too large.' }, { status: 413 });
   }
   try {
-    const upstream = await fetch(target, {
+    return await fetch(target, {
       method: request.method,
       headers,
-      ...(body === undefined ? {} : { body }),
+      body: request.body ? Buffer.concat(chunks, size) : null,
       cache: 'no-store',
       redirect: 'manual',
-    });
-    const responseHeaders = new Headers();
-    for (const name of forwardedResponseHeaders) {
-      const value = upstream.headers.get(name);
-      if (value !== null) {
-        responseHeaders.set(name, value);
-      }
-    }
-    return new Response(upstream.body, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers: responseHeaders,
+      signal: request.signal,
     });
   } catch {
     return Response.json({ error: 'Reviewer service is unavailable.' }, { status: 503 });

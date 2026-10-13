@@ -17,9 +17,10 @@ COPY apps/web ./apps/web
 COPY packages ./packages
 COPY .agents/skills/leverframe-ask/SKILL.md ./.agents/skills/leverframe-ask/SKILL.md
 COPY .agents/skills/leverframe-ask/scripts/ask.py ./.agents/skills/leverframe-ask/scripts/ask.py
+ARG REVIEWER_INTERNAL_URL=http://reviewer:6571
 RUN pnpm --filter @repo/reviewer build \
   && pnpm --filter @repo/reviewer deploy --prod /app/reviewer-runtime \
-  && pnpm --filter @repo/web build
+  && REVIEWER_INTERNAL_URL="$REVIEWER_INTERNAL_URL" pnpm --filter @repo/web build
 
 # Next standalone tracing omits ESM files behind pnpm's @swc/helpers symlink.
 RUN swc_helpers_source="$(find /app/node_modules/.pnpm -type d -path '*/node_modules/@swc/helpers' -print -quit)" \
@@ -41,7 +42,7 @@ RUN apt-get update \
 COPY --from=build --chown=node:node /app/reviewer-runtime/ ./
 
 USER node
-EXPOSE 6571
+EXPOSE 6571 6573
 
 CMD ["node", "dist/cli.js", "serve"]
 

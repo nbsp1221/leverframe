@@ -83,6 +83,9 @@ test('a response survives navigation and research returns to the same decision',
   await expect(page.getByText('Saved for later', { exact: true })).toBeVisible();
   await page.reload();
   await page.getByRole('button', { name: 'Answer now' }).click();
+  // A click does not wait for the wake request or the cached draft to be rebased.
+  await expect(input).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remind me in 1 hour' })).toBeEnabled();
   await page.reload();
   await expect(input).toHaveValue('Compare the impact before changing the policy.');
   await page.getByRole('button', { name: 'Request research', exact: true }).click();

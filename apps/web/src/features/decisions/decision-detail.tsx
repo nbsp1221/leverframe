@@ -26,7 +26,8 @@ export function DecisionDetail({
   onBack: () => void;
 }) {
   const t = useTranslations('decisions');
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<'snooze' | 'wake' | 'retry' | null>(null);
+  const busy = pending !== null;
   const [error, setError] = useState(false);
   const awaiting = item.status === 'awaiting_answer';
   const deferred = awaiting && Boolean(item.snoozedUntil && Date.parse(item.snoozedUntil) > now);
@@ -43,7 +44,7 @@ export function DecisionDetail({
     : item.facts.map((fact) => fact.detail);
 
   async function act(action: 'retry' | 'snooze') {
-    setBusy(true);
+    setPending(action === 'snooze' ? (deferred ? 'wake' : 'snooze') : 'retry');
     setError(false);
     try {
       if (action === 'retry') {
@@ -57,7 +58,7 @@ export function DecisionDetail({
       setError(true);
       await onChange();
     } finally {
-      setBusy(false);
+      setPending(null);
     }
   }
 
@@ -189,7 +190,10 @@ export function DecisionDetail({
               {item.waitingFor}
             </p>
           </section>
-          {!deferred && <DecisionAnswerForm key={item.id} item={item} onChange={onChange} />}
+          {/* Polling can show the new revision before the mutation rebases the cached draft. */}
+          {!deferred && pending !== 'wake' && (
+            <DecisionAnswerForm key={item.id} item={item} onChange={onChange} disabled={busy} />
+          )}
         </>
       )}
 

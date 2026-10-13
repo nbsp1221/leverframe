@@ -18,6 +18,7 @@ import { registerDecisionRoutes } from './routes/decisions.js';
 import { registerDevelopmentRoutes } from './routes/development.js';
 import { registerGitHubRoutes } from './routes/github.js';
 import { registerReviewExecutionRoutes } from './routes/review-execution.js';
+import { registerReviewSettingsRoutes } from './routes/review-settings.js';
 import { registerReviewRoutes } from './routes/reviews.js';
 import {
   type Dependency,
@@ -104,8 +105,23 @@ function createApi(
   registerGitHubRoutes(app, config, database, credentials, hooks, observed);
   registerDevelopmentRoutes(app, database, hooks);
   registerDecisionRoutes(app, hooks.decisions, hooks.decisionRegistration);
-  registerConnectorRoutes(app, hooks.connectors, hooks.decisions, hooks.decisionRegistration);
+  registerConnectorRoutes(
+    app,
+    config.uiBaseUrl,
+    hooks.connectors,
+    hooks.decisions,
+    hooks.decisionRegistration,
+  );
   registerReviewRoutes(app, database, hooks, observations, recordRead);
+  registerReviewSettingsRoutes(
+    app,
+    database.reviewSettings,
+    {
+      model: config.model,
+      reasoningEffort: config.reasoningEffort,
+    },
+    config.uiBaseUrl,
+  );
   registerReviewExecutionRoutes(app, database, traceStore, recordRead);
 
   const openApiDocument = app.getOpenAPI31Document({
@@ -176,11 +192,20 @@ export function createLeverframeServer(
   credentials: CredentialStore,
   hooks: ServerHooks = {},
   traceStore: ExecutionTraceStore = new ExecutionTraceStore(config.jobsDirectory),
+  surface: 'private' | 'webhook' = 'private',
 ) {
   const listener = getRequestListener(
     createApi(config, database, credentials, hooks, traceStore).fetch,
   );
   return createServer((request, response) => {
+    // A public listener must never expose the private API, setup or UI routes.
+    if (
+      surface === 'webhook' &&
+      (request.method !== 'POST' || request.url !== '/webhooks/github')
+    ) {
+      response.writeHead(404).end();
+      return;
+    }
     void listener(request, response);
   });
 }

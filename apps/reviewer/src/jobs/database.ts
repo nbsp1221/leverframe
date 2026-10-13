@@ -28,6 +28,7 @@ import {
   type ReviewMetrics,
   ReviewRepository,
 } from '../storage/review-repository.js';
+import { ReviewSettingsRepository } from '../storage/review-settings-repository.js';
 import type { ManualCommand } from './command.js';
 
 export interface PullRequestJobInput {
@@ -173,6 +174,7 @@ export class JobDatabase {
   readonly development: DevelopmentRepository;
   readonly developmentProjections: DevelopmentProjectionRepository;
   readonly developmentResources: DevelopmentResourceRepository;
+  readonly reviewSettings: ReviewSettingsRepository;
 
   constructor(path: string, options: { dataRoot?: string } = {}) {
     const dataRoot = resolve(
@@ -180,6 +182,7 @@ export class JobDatabase {
     );
     this.#database = openDatabase(path);
     runMigrations(this.#database);
+    this.reviewSettings = new ReviewSettingsRepository(this.#database);
     this.#reviewRepository = new ReviewRepository(this.#database, dataRoot);
     this.#githubThreadRepository = new GitHubThreadRepository(this.#database);
     this.#evaluationRepository = new EvaluationRepository(this.#database, (jobId) =>
