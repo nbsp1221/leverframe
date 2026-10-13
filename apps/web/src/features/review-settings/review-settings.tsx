@@ -81,7 +81,7 @@ export function ReviewSettings() {
         reasoningEffort: selectedEffort,
       });
       setData(next);
-      setDraft(null);
+      setDraft((current) => (current === retainedDraft ? null : current));
       setSaved(true);
     } catch {
       setSaveError(true);

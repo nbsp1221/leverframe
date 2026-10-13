@@ -8,6 +8,43 @@ import {
 
 const original = { model: 'gpt-6-astra', reasoningEffort: 'high' };
 
+test('an earlier save does not clear a newer draft after browser history navigation', async ({
+  page,
+}) => {
+  let releaseSave!: () => void;
+  const pendingSave = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  await page.route('**/api/v1/settings/reviews', async (route) => {
+    if (route.request().method() === 'PUT') {
+      await pendingSave;
+    }
+    await route.fulfill({ json: { current: original, models: reviewModels } });
+  });
+  await page.goto('/en/settings');
+  await page
+    .getByRole('navigation', { name: 'Settings categories', exact: true })
+    .getByRole('link', { name: /^Code Review Bot/ })
+    .click();
+  await page.getByLabel('Model', { exact: true }).click();
+  await page.getByRole('option', { name: 'GPT-6.1 Sol', exact: true }).click();
+  const saving = page.waitForRequest((request) => request.method() === 'PUT');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await saving;
+  await page.goBack();
+  await expect(page).toHaveURL(/\/en\/settings(?:\?|$)/);
+  await page.goForward();
+  await page.getByLabel('Model', { exact: true }).click();
+  await page.getByRole('option', { name: 'GPT-5.6 Sol', exact: true }).click();
+  const completed = page.waitForResponse((response) => response.request().method() === 'PUT');
+  releaseSave();
+  await completed;
+  await expect(
+    page.getByLabel('Model', { exact: true }).locator('[data-slot="select-value"]'),
+  ).toHaveText('GPT-5.6 Sol');
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+});
+
 test('preserves an unsaved setting through browser back and forward', async ({ page }) => {
   await page.route('**/api/v1/settings/reviews', (route) =>
     route.fulfill({ json: { current: original, models: reviewModels } }),
