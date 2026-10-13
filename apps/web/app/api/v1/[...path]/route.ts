@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { connectorMaximumResultBytes } from '@repo/contracts/connectors';
 
 async function proxy(request: Request, context: { params: Promise<{ path: string[] }> }) {
@@ -15,20 +16,34 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
       headers.set(name, value);
     }
   }
-  // Finish reading the upload before forwarding, so an early rejection cannot reset it.
-  const body = ['GET', 'HEAD'].includes(request.method) ? null : await request.arrayBuffer();
   const limit =
     path[0] === 'connectors' && path[1] === 'agent' && path[2] === 'results'
       ? connectorMaximumResultBytes
       : 1024 * 1024;
-  if (body && body.byteLength > limit) {
+  // Drain rejected uploads without retaining them, so 413 cannot reset an active upload.
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (reader) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    size += value.byteLength;
+    if (size <= limit) {
+      chunks.push(value);
+    } else {
+      chunks.length = 0;
+    }
+  }
+  if (size > limit) {
     return Response.json({ error: 'Request body is too large.' }, { status: 413 });
   }
   try {
     return await fetch(target, {
       method: request.method,
       headers,
-      body,
+      body: request.body ? Buffer.concat(chunks, size) : null,
       cache: 'no-store',
       redirect: 'manual',
       signal: request.signal,
@@ -40,8 +55,6 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
 
 export const DELETE = proxy;
 export const GET = proxy;
-export const HEAD = proxy;
-export const OPTIONS = proxy;
 export const PATCH = proxy;
 export const POST = proxy;
 export const PUT = proxy;
