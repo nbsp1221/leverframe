@@ -1,17 +1,14 @@
-import { connectorMaximumResultBytes } from '@repo/contracts/connectors';
 import createNextIntlPlugin from 'next-intl/plugin';
 
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig = {
   output: 'standalone' as const,
-  experimental: { proxyClientMaxBodySize: connectorMaximumResultBytes },
   rewrites() {
     const backend = process.env.REVIEWER_INTERNAL_URL?.replace(/\/+$/, '');
     return backend
       ? {
           beforeFiles: [
-            '/api/v1/:path*',
             '/healthz',
             '/setup/github/:path*',
             '/openapi.json',

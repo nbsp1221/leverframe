@@ -104,7 +104,7 @@ docker compose ps
 
 Compose runs two independently healthy services: the reviewer API listens on internal port `6571`, and the Next.js web app listens on internal port `6572`. Only Next.js (`WEB_PORT=6572`) and the webhook-only listener (`WEBHOOK_PORT=6573`) have host bindings, both loopback-only by default. The reviewer API stays inside the Compose network; set the corresponding `*_BIND_ADDRESS` values only when the deployment boundary requires it.
 
-Next.js forwards API, setup and documentation requests through its built-in rewrites in development and production. Caddy is optional: direct private-network access to Next.js uses the same routes. Set `APP_UI_BASE_URL` to the browser-facing origin, including its scheme and port, so browser write checks use the external address rather than the internal HTTP hop.
+Next.js forwards API requests through a Route Handler and setup and documentation requests through built-in rewrites in development and production. The API handler completes uploads before forwarding and retains the 1 MiB request limit, with 32 MiB allowed for connector results. Caddy is optional: direct private-network access to Next.js uses the same routes. Set `APP_UI_BASE_URL` to the browser-facing origin, including its scheme and port, so browser write checks use the external address rather than the internal HTTP hop.
 
 Rewrites are compiled at build time: non-Docker builds must receive `REVIEWER_INTERNAL_URL` when running `pnpm build`; the Docker build defaults it to `http://reviewer:6571`. Changing that internal destination requires rebuilding the web app. When running the reviewer outside Compose, set `GITHUB_WEBHOOK_PORT` to enable the separate webhook-only listener.
 

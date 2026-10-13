@@ -87,7 +87,7 @@ describe('Review model settings API', () => {
     expect(response.status).toBe(200);
   });
 
-  it('ignores forwarded-origin claims and enforces body limits at the backend', async () => {
+  it('ignores forwarded-origin claims', async () => {
     const { endpoint } = await start(temporaryRoot(), 'gpt-6-astra', 'https://app.example.com');
     for (const origin of ['https://untrusted.example', 'null', new URL(endpoint).origin]) {
       const response = await fetch(endpoint, {
@@ -102,12 +102,6 @@ describe('Review model settings API', () => {
       });
       expect(response.status).toBe(403);
     }
-    const oversized = await fetch(endpoint, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'x'.repeat(1024 * 1024), reasoningEffort: 'high' }),
-    });
-    expect(oversized.status).toBe(413);
   });
 
   it('persists both fields through server restart and overrides changed environment defaults', async () => {

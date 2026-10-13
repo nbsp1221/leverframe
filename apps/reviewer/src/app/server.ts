@@ -4,12 +4,10 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { MiddlewareHandler } from 'hono';
 import { getRequestListener } from '@hono/node-server';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
 import { createMarkdownFromOpenApi } from '@scalar/openapi-to-markdown';
-import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import type { CredentialStore } from '../github/credentials.js';
 import type { JobDatabase } from '../jobs/database.js';
@@ -104,13 +102,6 @@ function createApi(
     observed('database', 'healthy');
   };
 
-  // Connector results and question creation have their own, different limits.
-  const limitBody: MiddlewareHandler = (c, next) =>
-    c.req.path.startsWith('/api/v1/connectors/') || c.req.path === '/api/v1/decisions'
-      ? next()
-      : bodyLimit({ maxSize: 1024 * 1024 })(c, next);
-
-  app.use('/api/v1/*', limitBody);
   registerGitHubRoutes(app, config, database, credentials, hooks, observed);
   registerDevelopmentRoutes(app, database, hooks);
   registerDecisionRoutes(app, hooks.decisions, hooks.decisionRegistration);
@@ -206,7 +197,7 @@ export function createLeverframeServer(
   const listener = getRequestListener(
     createApi(config, database, credentials, hooks, traceStore).fetch,
   );
-  const server = createServer((request, response) => {
+  return createServer((request, response) => {
     // A public listener must never expose the private API, setup or UI routes.
     if (
       surface === 'webhook' &&
@@ -217,8 +208,4 @@ export function createLeverframeServer(
     }
     void listener(request, response);
   });
-
-  // Next.js can reuse an upstream socket while closing its previous proxy request.
-  server.maxRequestsPerSocket = 1;
-  return server;
 }
