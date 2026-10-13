@@ -4,10 +4,12 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { MiddlewareHandler } from 'hono';
 import { getRequestListener } from '@hono/node-server';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
 import { createMarkdownFromOpenApi } from '@scalar/openapi-to-markdown';
+import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import type { CredentialStore } from '../github/credentials.js';
 import type { JobDatabase } from '../jobs/database.js';
@@ -102,15 +104,33 @@ function createApi(
     observed('database', 'healthy');
   };
 
+  // Connector results and question creation have their own, different limits.
+  const limitBody: MiddlewareHandler = (c, next) =>
+    c.req.path.startsWith('/api/v1/connectors/') || c.req.path === '/api/v1/decisions'
+      ? next()
+      : bodyLimit({ maxSize: 1024 * 1024 })(c, next);
+
+  app.use('/api/v1/*', limitBody);
   registerGitHubRoutes(app, config, database, credentials, hooks, observed);
   registerDevelopmentRoutes(app, database, hooks);
   registerDecisionRoutes(app, hooks.decisions, hooks.decisionRegistration);
-  registerConnectorRoutes(app, hooks.connectors, hooks.decisions, hooks.decisionRegistration);
+  registerConnectorRoutes(
+    app,
+    config.uiBaseUrl,
+    hooks.connectors,
+    hooks.decisions,
+    hooks.decisionRegistration,
+  );
   registerReviewRoutes(app, database, hooks, observations, recordRead);
-  registerReviewSettingsRoutes(app, database.reviewSettings, {
-    model: config.model,
-    reasoningEffort: config.reasoningEffort,
-  });
+  registerReviewSettingsRoutes(
+    app,
+    database.reviewSettings,
+    {
+      model: config.model,
+      reasoningEffort: config.reasoningEffort,
+    },
+    config.uiBaseUrl,
+  );
   registerReviewExecutionRoutes(app, database, traceStore, recordRead);
 
   const openApiDocument = app.getOpenAPI31Document({
@@ -181,11 +201,24 @@ export function createLeverframeServer(
   credentials: CredentialStore,
   hooks: ServerHooks = {},
   traceStore: ExecutionTraceStore = new ExecutionTraceStore(config.jobsDirectory),
+  surface: 'private' | 'webhook' = 'private',
 ) {
   const listener = getRequestListener(
     createApi(config, database, credentials, hooks, traceStore).fetch,
   );
-  return createServer((request, response) => {
+  const server = createServer((request, response) => {
+    // A public listener must never expose the private API, setup or UI routes.
+    if (
+      surface === 'webhook' &&
+      (request.method !== 'POST' || request.url !== '/webhooks/github')
+    ) {
+      response.writeHead(404).end();
+      return;
+    }
     void listener(request, response);
   });
+
+  // Next.js can reuse an upstream socket while closing its previous proxy request.
+  server.maxRequestsPerSocket = 1;
+  return server;
 }

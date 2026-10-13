@@ -18,6 +18,7 @@ export function registerReviewSettingsRoutes(
   app: OpenAPIHono,
   repository: ReviewSettingsRepository,
   defaults: ReviewModelSettings,
+  uiBaseUrl: string,
 ) {
   const current = () =>
     reviewSettingsResponseSchema.parse({ current: repository.get(defaults), models: reviewModels });
@@ -62,7 +63,7 @@ export function registerReviewSettingsRoutes(
     }),
     (c) => {
       const origin = c.req.header('origin');
-      if (origin && origin !== new URL(c.req.url).origin) {
+      if (origin && origin !== new URL(uiBaseUrl).origin) {
         return apiError(c, 403, 'origin_rejected');
       }
       repository.save(c.req.valid('json'));

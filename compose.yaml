@@ -15,9 +15,10 @@ services:
       APP_DATA_DIRECTORY: ${APP_DATA_DIRECTORY:?Set APP_DATA_DIRECTORY in .env}
       APP_HOST: 0.0.0.0
       APP_PORT: '6571'
+      GITHUB_WEBHOOK_PORT: '6573'
       REVIEW_SANDBOX_TEMPLATE: ${REVIEW_SANDBOX_TEMPLATE:?Install the local review sandbox template and set REVIEW_SANDBOX_TEMPLATE in .env}
     ports:
-      - '${REVIEWER_BIND_ADDRESS:-127.0.0.1}:${REVIEWER_PORT:-6571}:6571'
+      - '${WEBHOOK_BIND_ADDRESS:-127.0.0.1}:${WEBHOOK_PORT:-6573}:6573'
     volumes:
       - ${APP_DATA_DIRECTORY:?Set APP_DATA_DIRECTORY in .env}:${APP_DATA_DIRECTORY:?Set APP_DATA_DIRECTORY in .env}
       - ${SANDBOX_CLI_PATH:-/usr/bin/sbx}:/usr/local/bin/sbx:ro

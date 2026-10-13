@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { type CAC, cac } from 'cac';
 import { loadServerConfig } from './app/config.js';
 import { createDecisionRuntime } from './app/decision-runtime.js';
-import { createLeverframeServer } from './app/server.js';
+import { type ServerHooks, createLeverframeServer } from './app/server.js';
 import { DevelopmentController } from './development/controller.js';
 import { ExecutionTraceStore } from './execution/trace.js';
 import { GitHubAppClient } from './github/client.js';
@@ -149,11 +149,22 @@ function serve(): void {
   });
   const threadWorker = new ThreadSideEffectWorker({ credentials, database });
   const commandHandler = new ManualCommandHandler({ credentials, database, worker });
+  const webhookHooks: ServerHooks = {
+    onJobQueued: (job) => worker.cancelSuperseded(job),
+    onManualCommand: (command) => commandHandler.handle(command),
+    onPullRequestCancelled: (cancellation) => {
+      worker.cancelPullRequest(cancellation);
+      void developmentController
+        .observePullRequestClosed(cancellation)
+        .catch((error: unknown) => console.error('development PR lifecycle update failed', error));
+    },
+  };
   const server = createLeverframeServer(
     config,
     database,
     credentials,
     {
+      ...webhookHooks,
       ...(decisions
         ? {
             decisions: decisions.service,
@@ -163,16 +174,6 @@ function serve(): void {
         : {}),
       isSandboxAvailable: () => sandboxRuntimeAvailable(config.sandboxTemplate),
       isWorkerRunning: () => worker.isRunning && threadWorker.isRunning,
-      onJobQueued: (job) => worker.cancelSuperseded(job),
-      onManualCommand: (command) => commandHandler.handle(command),
-      onPullRequestCancelled: (cancellation) => {
-        worker.cancelPullRequest(cancellation);
-        void developmentController
-          .observePullRequestClosed(cancellation)
-          .catch((error: unknown) =>
-            console.error('development PR lifecycle update failed', error),
-          );
-      },
       getFindingContext: (input) => github.getFindingContext(input),
       listDevelopmentRepositories: async () =>
         (await github.listRepositories(config.allowedOwnerId)).map((repository) => ({
@@ -256,6 +257,19 @@ function serve(): void {
     },
     traceStore,
   );
+  const servers = [server];
+  if (config.webhookPort !== undefined) {
+    const webhook = createLeverframeServer(
+      config,
+      database,
+      credentials,
+      webhookHooks,
+      traceStore,
+      'webhook',
+    );
+    webhook.listen(config.webhookPort, config.host);
+    servers.push(webhook);
+  }
 
   let shuttingDown = false;
   const startupAbort = new AbortController();
@@ -270,15 +284,20 @@ function serve(): void {
 
     // Stop accepting new requests first. SSE streams can remain open for an
     // entire run, so close active connections after workers have stopped.
-    const serverClosed = new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error !== undefined) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
+    const serverClosed = Promise.all(
+      servers.map(
+        (listener) =>
+          new Promise<void>((resolve, reject) => {
+            listener.close((error) => {
+              if (error !== undefined) {
+                reject(error);
+                return;
+              }
+              resolve();
+            });
+          }),
+      ),
+    );
     void (async () => {
       try {
         await Promise.all([
@@ -289,7 +308,9 @@ function serve(): void {
           ticketProjectionWorker?.stop(),
           decisions?.close(),
         ]);
-        server.closeAllConnections();
+        for (const listener of servers) {
+          listener.closeAllConnections();
+        }
         await serverClosed;
         database.close();
         process.exitCode = 0;

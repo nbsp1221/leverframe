@@ -23,6 +23,7 @@ const connectorBodyLimit: MiddlewareHandler = (c, next) =>
 
 export function registerConnectorRoutes(
   app: OpenAPIHono,
+  uiBaseUrl: string,
   runtime?: ConnectorRuntime,
   service?: DecisionService,
   registration?: DecisionRegistration,
@@ -42,7 +43,7 @@ export function registerConnectorRoutes(
         return c.json({ error: 'user_action_required' }, 403);
       }
       const origin = c.req.header('origin');
-      if (origin && origin !== new URL(c.req.url).origin) {
+      if (origin && origin !== new URL(uiBaseUrl).origin) {
         return c.json({ error: 'origin_rejected' }, 403);
       }
       if (!c.req.header('content-type')?.startsWith('application/json')) {

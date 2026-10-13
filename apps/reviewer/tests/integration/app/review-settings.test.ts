@@ -17,11 +17,11 @@ afterEach(() => {
   }
 });
 
-async function start(root: string, model = 'gpt-6-astra') {
+async function start(root: string, model = 'gpt-6-astra', uiBaseUrl = 'http://localhost') {
   const config = loadServerConfig({
     APP_DATA_DIRECTORY: root,
     APP_RESOURCES_DIRECTORY: fileURLToPath(new URL('../../../resources', import.meta.url)),
-    APP_UI_BASE_URL: 'http://localhost',
+    APP_UI_BASE_URL: uiBaseUrl,
     GITHUB_ALLOWED_OWNER_ID: '1',
     GITHUB_APP_NAME: 'review-settings-test',
     GITHUB_WEBHOOK_URL: 'http://localhost/webhooks/github',
@@ -71,6 +71,45 @@ function temporaryRoot() {
 }
 
 describe('Review model settings API', () => {
+  it('accepts the configured public UI origin over an HTTP proxy upstream', async () => {
+    const { endpoint } = await start(temporaryRoot(), 'gpt-6-astra', 'https://app.example.com');
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'host': 'app.example.com',
+        'origin': 'https://app.example.com',
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'app.example.com',
+      },
+      body: JSON.stringify({ model: 'gpt-6.1-sol', reasoningEffort: 'high' }),
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it('ignores forwarded-origin claims and enforces body limits at the backend', async () => {
+    const { endpoint } = await start(temporaryRoot(), 'gpt-6-astra', 'https://app.example.com');
+    for (const origin of ['https://untrusted.example', 'null', new URL(endpoint).origin]) {
+      const response = await fetch(endpoint, {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          'x-forwarded-host': 'app.example.com',
+          'x-forwarded-proto': 'https',
+        },
+        body: JSON.stringify({ model: 'gpt-6.1-sol', reasoningEffort: 'high' }),
+      });
+      expect(response.status).toBe(403);
+    }
+    const oversized = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x'.repeat(1024 * 1024), reasoningEffort: 'high' }),
+    });
+    expect(oversized.status).toBe(413);
+  });
+
   it('persists both fields through server restart and overrides changed environment defaults', async () => {
     const root = temporaryRoot();
     const first = await start(root);

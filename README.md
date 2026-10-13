@@ -86,8 +86,8 @@ Imports remain explicit rather than using barrel exports. The `review` modules d
 The deployment boundary is:
 
 ```text
-GitHub -> public Caddy webhook route (`leverframe-api.retn0.dev`) -> reviewer
-Tailnet operator -> private Caddy route (`leverframe.retn0.dev`) -> web / reviewer API
+GitHub -> optional TLS reverse proxy -> webhook-only listener (6573)
+Private-network operator -> optional TLS reverse proxy -> Next.js (6572) -> reviewer (6571)
 reviewer -> host sandboxd Unix socket -> disposable Codex Docker Sandbox
 ```
 
@@ -102,11 +102,17 @@ docker compose up -d
 docker compose ps
 ```
 
-Compose runs two independently healthy services: the reviewer listens on internal port `6571`, and the Next.js web app listens on internal port `6572`. The default host bindings are loopback-only (`REVIEWER_PORT=6571` and `WEB_PORT=6572`); set the corresponding `*_BIND_ADDRESS` values only when the deployment boundary requires it. The web service is intentionally not blocked on reviewer health, so it can show its degraded backend state while the reviewer recovers.
+Compose runs two independently healthy services: the reviewer API listens on internal port `6571`, and the Next.js web app listens on internal port `6572`. Only Next.js (`WEB_PORT=6572`) and the webhook-only listener (`WEBHOOK_PORT=6573`) have host bindings, both loopback-only by default. The reviewer API stays inside the Compose network; set the corresponding `*_BIND_ADDRESS` values only when the deployment boundary requires it.
+
+Next.js forwards API, setup and documentation requests through its built-in rewrites in development and production. Caddy is optional: direct private-network access to Next.js uses the same routes. Set `APP_UI_BASE_URL` to the browser-facing origin, including its scheme and port, so browser write checks use the external address rather than the internal HTTP hop.
+
+Rewrites are compiled at build time: non-Docker builds must receive `REVIEWER_INTERNAL_URL` when running `pnpm build`; the Docker build defaults it to `http://reviewer:6571`. Changing that internal destination requires rebuilding the web app. When running the reviewer outside Compose, set `GITHUB_WEBHOOK_PORT` to enable the separate webhook-only listener.
+
+The web service is intentionally not blocked on reviewer health, so it can show its degraded backend state while the reviewer recovers.
 
 Runtime state stays with the checkout in `.leverframe/`; no root-owned directory or system-wide application path is required. Only the reviewer mounts the data directory, sandbox CLI/configuration, and sandbox daemon state. The data directory is mounted at the same absolute path because the host `sandboxd` daemon must be able to resolve per-job anchor and resource paths created by the reviewer container. The web container receives no GitHub credentials, sandbox mounts, or data volume. Private repository contents are still cloned only inside the disposable Sandbox.
 
-This MVP intentionally has no application-level authentication. Keep the UI, API, and setup flow behind an operator-controlled private network such as Tailscale; anyone who can reach them can read review artifacts and change evaluations. The public GitHub host must expose only the exact webhook endpoint. It must not expose the UI, API, or setup routes.
+This MVP intentionally has no application-level authentication. Keep the UI, API, and setup flow behind an operator-controlled private network such as Tailscale; anyone who can reach them can read review artifacts and change evaluations. The public GitHub host must target the webhook-only listener, which accepts only `POST /webhooks/github` and returns 404 for every other method or path. Never target the private reviewer API or Next.js from that public host. The listener enforces this boundary without requiring path rules in a reverse proxy.
 
 ## Code review model settings
 
@@ -137,30 +143,15 @@ app.example.com {
         respond 403
     }
 
-    @reviewer path /api/* /healthz /setup/github* /openapi.json /docs /docs/* /llms.txt
-    handle @reviewer {
-        reverse_proxy reviewer:6571
-    }
-    handle {
-        reverse_proxy web:6572
-    }
+    reverse_proxy web:6572
 }
 
 api.example.com {
-    @github_webhook {
-        method POST
-        path /webhooks/github
-    }
-    handle @github_webhook {
-        reverse_proxy reviewer:6571
-    }
-    handle {
-        respond 404
-    }
+    reverse_proxy reviewer:6573
 }
 ```
 
-The repository does not modify or reload an operating Caddy configuration. For local testing, the ignored `compose.override.yaml` connects both services to the existing external `caddy-network`; verify that network and the current Caddy aliases before use. Keep any host-specific Caddy file outside this repository or in an ignored local deployment directory.
+The repository does not modify or reload an operating Caddy configuration. For local testing, the ignored `compose.override.yaml` connects the required services to the existing external `caddy-network`; verify that network and the current Caddy aliases before use. Keep any host-specific Caddy file outside this repository or in an ignored local deployment directory.
 
 Before changing an operating Caddy route, save a backup, run `caddy validate --config <config>`, and inspect the rendered route priority. After explicit approval, use a graceful reload and smoke test both `https://<host>/en/reviews` and same-origin `/api/v1/status`; also verify an existing virtual host before and after the reload. Do not stop the Caddy container or reload unrelated virtual hosts. The sandbox daemon directory is mounted read-only rather than binding only the socket file, so a daemon restart can replace the socket without leaving the reviewer attached to a stale inode. Starting and supervising the host `sandboxd` process is an infrastructure prerequisite and is intentionally outside Leverframe's deployment scope.
 

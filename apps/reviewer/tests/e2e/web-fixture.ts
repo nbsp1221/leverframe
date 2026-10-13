@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLeverframeServer } from '../../src/app/server.js';
+import { ConnectorRuntime } from '../../src/connectors/runtime.js';
+import { ConnectorStore } from '../../src/connectors/store.js';
 import { CredentialStore } from '../../src/github/credentials.js';
 import { JobDatabase } from '../../src/jobs/database.js';
 import { createDecisionPreview } from '../fixtures/decision-runtime.js';
@@ -11,6 +13,7 @@ const persistentRoot = process.env.LEVERFRAME_PREVIEW_ROOT;
 const root = persistentRoot ?? mkdtempSync(join(tmpdir(), 'leverframe-e2e-'));
 mkdirSync(root, { recursive: true });
 const decisionPreview = createDecisionPreview(join(root, 'decisions.sqlite'));
+const connectors = new ConnectorRuntime(new ConnectorStore(':memory:'), new Map());
 const port = Number(process.env.LEVERFRAME_PREVIEW_PORT ?? '16722');
 const dataRoot = join(root, 'data');
 const credentialsDirectory = join(dataRoot, 'credentials');
@@ -77,7 +80,7 @@ const server = createLeverframeServer(
     githubAppName: 'e2e',
     model: 'gpt-6-astra',
     port,
-    uiBaseUrl: `http://127.0.0.1:${port}`,
+    uiBaseUrl: process.env.LEVERFRAME_E2E_UI_URL ?? 'http://127.0.0.1:16721',
     webhookUrl: `http://127.0.0.1:${port}/webhooks/github`,
     reasoningEffort: 'high',
     resourcesDirectory: fileURLToPath(new URL('../../resources', import.meta.url)),
@@ -90,7 +93,14 @@ const server = createLeverframeServer(
   },
   database,
   credentials,
-  { decisions: decisionPreview.service },
+  {
+    decisions: decisionPreview.service,
+    connectors,
+    decisionRegistration: {
+      token: 'e2e-registration-token-not-a-real-secret',
+      resolve: () => Promise.reject(new Error('No live conversations in the fixture')),
+    },
+  },
 );
 
 server.listen(port, '127.0.0.1', () => {
@@ -99,6 +109,8 @@ server.listen(port, '127.0.0.1', () => {
 
 function shutdown() {
   server.close(() => {
+    connectors.stop();
+    connectors.store.close();
     decisionPreview.close();
     database.close();
     if (!persistentRoot) {
