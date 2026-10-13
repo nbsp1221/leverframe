@@ -1,6 +1,47 @@
 import { expect, test } from '@playwright/test';
 import { decisionListSchema, decisionSchema } from '@repo/contracts/decisions';
 
+for (const cacheUnavailable of [false, true]) {
+  test(`a failed snooze preserves the draft, unavailable cache: ${cacheUnavailable}`, async ({
+    page,
+    request,
+  }) => {
+    if (cacheUnavailable) {
+      await page.addInitScript(() => {
+        const setItem = Reflect.get(Storage.prototype, 'setItem');
+        Storage.prototype.setItem = function (key, value) {
+          if (key.startsWith('decision-draft:')) {
+            throw new DOMException('Draft cache is full', 'QuotaExceededError');
+          }
+          setItem.call(this, key, value);
+        };
+      });
+    }
+    const seed = await request.get('/api/v1/decisions/dr-104');
+    const item = decisionSchema.parse({
+      ...decisionSchema.parse(await seed.json()),
+      id: 'failed-snooze',
+      status: 'awaiting_answer',
+      revision: 0,
+      answers: [],
+      events: [],
+      snoozedUntil: null,
+    });
+    await page.route('**/api/v1/decisions', (route) => route.fulfill({ json: { items: [item] } }));
+    await page.route('**/api/v1/decisions/failed-snooze/snooze', (route) =>
+      route.fulfill({ status: 503, json: { error: 'unavailable' } }),
+    );
+    await page.goto('/en/decisions?request=failed-snooze');
+    const input = page.getByLabel('Your view or additional conditions');
+    const text = 'Keep this answer even if the request cannot be snoozed.';
+    await input.fill(text);
+    await page.getByRole('button', { name: 'Remind me in 1 hour' }).click();
+    await expect(page.locator('article').getByRole('alert')).toBeVisible();
+    await expect(input).toHaveValue(text);
+    await expect(page.getByRole('button', { name: 'Send response', exact: true })).toBeEnabled();
+  });
+}
+
 for (const reloadBeforeAcknowledgement of [false, true]) {
   test(`a delayed wake preserves the draft, reload before acknowledgement: ${reloadBeforeAcknowledgement}`, async ({
     page,

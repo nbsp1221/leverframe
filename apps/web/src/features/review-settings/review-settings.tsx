@@ -21,11 +21,13 @@ import { PageHeader } from '../../components/page-header';
 import { PageSurface } from '../../components/page-surface';
 import { registerDirtyNavigation } from '../../lib/dirty-navigation';
 import { requestReviewSettings } from './review-settings-api';
+import { useReviewSettingsDraft } from './review-settings-draft';
 
 export function ReviewSettings() {
   const t = useTranslations('reviewSettings');
   const [data, setData] = useState<ReviewSettingsResponse | null>(null);
-  const [draft, setDraft] = useState({ model: '', reasoningEffort: '' });
+  const [retainedDraft, setDraft] = useReviewSettingsDraft();
+  const draft = retainedDraft ?? data?.current ?? { model: '', reasoningEffort: '' };
   const [loadError, setLoadError] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,7 +45,6 @@ export function ReviewSettings() {
     try {
       const next = await requestReviewSettings();
       setData(next);
-      setDraft(next.current);
       setLoadError(false);
     } catch {
       setLoadError(true);
@@ -56,7 +57,7 @@ export function ReviewSettings() {
     if (!dirty) {
       return;
     }
-    const unregister = registerDirtyNavigation(t('unsavedPrompt'));
+    const unregister = registerDirtyNavigation(t('unsavedPrompt'), () => setDraft(null));
 
     const beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
 
@@ -65,7 +66,7 @@ export function ReviewSettings() {
       unregister();
       window.removeEventListener('beforeunload', beforeUnload);
     };
-  }, [dirty, t]);
+  }, [dirty, t, setDraft]);
 
   const save = async () => {
     if (!canSave || selectedEffort === undefined) {
@@ -80,7 +81,7 @@ export function ReviewSettings() {
         reasoningEffort: selectedEffort,
       });
       setData(next);
-      setDraft(next.current);
+      setDraft(null);
       setSaved(true);
     } catch {
       setSaveError(true);
@@ -248,7 +249,7 @@ export function ReviewSettings() {
                   variant="outline"
                   disabled={!dirty || saving}
                   onClick={() => {
-                    setDraft(data.current);
+                    setDraft(null);
                     setSaveError(false);
                     setSaved(false);
                   }}

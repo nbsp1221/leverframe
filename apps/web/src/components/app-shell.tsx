@@ -34,6 +34,7 @@ import { useTheme } from 'next-themes';
 import Image from 'next/image';
 import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { type CSSProperties, useEffect, useState } from 'react';
+import { ReviewSettingsDraftProvider } from '../features/review-settings/review-settings-draft';
 import { Link, usePathname, useRouter } from '../i18n/navigation';
 import { confirmDirtyNavigation } from '../lib/dirty-navigation';
 import { useSettingsHref } from './connection-settings-link';
@@ -47,14 +48,16 @@ const shellSize = {
 
 export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <TooltipProvider delay={250}>
-      <NuqsAdapter>
-        <SidebarProvider defaultOpen style={shellSize}>
-          <AppSidebar />
-          <SidebarMain>{children}</SidebarMain>
-        </SidebarProvider>
-      </NuqsAdapter>
-    </TooltipProvider>
+    <ReviewSettingsDraftProvider>
+      <TooltipProvider delay={250}>
+        <NuqsAdapter>
+          <SidebarProvider defaultOpen style={shellSize}>
+            <AppSidebar />
+            <SidebarMain>{children}</SidebarMain>
+          </SidebarProvider>
+        </NuqsAdapter>
+      </TooltipProvider>
+    </ReviewSettingsDraftProvider>
   );
 }
 

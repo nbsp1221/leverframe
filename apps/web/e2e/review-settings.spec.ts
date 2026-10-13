@@ -8,6 +8,40 @@ import {
 
 const original = { model: 'gpt-6-astra', reasoningEffort: 'high' };
 
+test('preserves an unsaved setting through browser back and forward', async ({ page }) => {
+  await page.route('**/api/v1/settings/reviews', (route) =>
+    route.fulfill({ json: { current: original, models: reviewModels } }),
+  );
+  await page.goto('/en/settings');
+  await page
+    .getByRole('navigation', { name: 'Settings categories', exact: true })
+    .getByRole('link', { name: /^Code Review Bot/ })
+    .click();
+  await page.getByLabel('Model', { exact: true }).click();
+  await page.getByRole('option', { name: 'GPT-6.1 Sol', exact: true }).click();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/en\/settings(?:\?|$)/);
+  await page.goForward();
+  await expect(
+    page.getByLabel('Model', { exact: true }).locator('[data-slot="select-value"]'),
+  ).toHaveText('GPT-6.1 Sol');
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Settings', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/en\/settings(?:\?|$)/);
+  await page
+    .getByRole('navigation', { name: 'Settings categories', exact: true })
+    .getByRole('link', { name: /^Code Review Bot/ })
+    .click();
+  await expect(
+    page.getByLabel('Model', { exact: true }).locator('[data-slot="select-value"]'),
+  ).toHaveText('GPT-6 Astra');
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+});
+
 test('saves a model and reasoning pair through the real API, reloads it, and discards an unsaved edit', async ({
   page,
   request,
